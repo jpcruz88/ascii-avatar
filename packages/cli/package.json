@@ -1,0 +1,20 @@
+{
+  "name": "@ascii-avatar/cli",
+  "version": "0.1.0",
+  "description": "CLI de ascii-avatar (comando avatar).",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "avatar": "dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@ascii-avatar/core": "*",
+    "@ascii-avatar/gemini": "*"
+  }
+}

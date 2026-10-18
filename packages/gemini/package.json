@@ -1,0 +1,24 @@
+{
+  "name": "@ascii-avatar/gemini",
+  "version": "0.1.0",
+  "description": "Cliente de Gemini para ascii-avatar: imágenes, voz y expresiones.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@google/genai": "^2.30.0"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "@ascii-avatar/core",
+  "version": "0.1.0",
+  "description": "Núcleo de ascii-avatar: caras, render ASCII, animación y almacenamiento.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "sharp": "^0.35.5"
+  }
+}
