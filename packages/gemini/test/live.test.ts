@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { createGeminiImageClient, generateFace, loadGeminiConfig } from '../src/index.js';
+import { parseWav } from '@ascii-avatar/core';
+import {
+  createGeminiImageClient,
+  createGeminiTtsClient,
+  generateFace,
+  loadGeminiConfig,
+  synthesizeSpeech,
+} from '../src/index.js';
 
-// Prueba en vivo: llama a la API real y cuesta ~$0.04. Solo corre a propósito.
+// Pruebas en vivo: llaman a la API real (la cara cuesta ~$0.04, la voz menos de $0.01). Solo corren a propósito.
 const live = process.env['RUN_LIVE'] === '1' && Boolean(process.env['GEMINI_API_KEY']);
 
 // Un PNG 1x1 no sirve de retrato; la prueba usa la foto indicada en LIVE_PHOTO.
@@ -19,4 +26,15 @@ describe.skipIf(!live)('Gemini en vivo', () => {
     expect(png.subarray(0, 4).toString('hex')).toBe('89504e47');
     expect(costUsd).toBeGreaterThan(0);
   }, 120_000);
+
+  it('sintetiza "Hola" y devuelve un WAV legible de entre 0.3 y 3 segundos', async () => {
+    const client = createGeminiTtsClient(loadGeminiConfig());
+    const { wav, costUsd } = await synthesizeSpeech(client, 'Hola', 'Kore');
+
+    const { sampleRate, samples } = parseWav(wav);
+    const seconds = samples.length / sampleRate;
+    expect(seconds).toBeGreaterThanOrEqual(0.3);
+    expect(seconds).toBeLessThanOrEqual(3);
+    expect(costUsd).toBeGreaterThan(0);
+  }, 60_000);
 });

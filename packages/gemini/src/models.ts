@@ -7,11 +7,13 @@
 export const DEFAULT_IMAGE_MODEL = 'gemini-nano-banana-2.1';
 
 /**
- * Modelo de voz (TTS). Este id aún no se ha verificado contra la doc oficial:
- * se confirma al construir la voz (Task 10). Mientras tanto se puede forzar con
- * ASCII_AVATAR_TTS_MODEL.
+ * Modelo de voz (TTS). `gemini-3.8-flash-tts` es el que la doc oficial usa en sus
+ * ejemplos de la API de Interacciones (guía de generación de voz) y el que el
+ * changelog del 2026-09-22 presenta como disponible general. El anterior,
+ * `gemini-3.1-flash-tts-preview`, sigue en la página de precios y se puede forzar
+ * con ASCII_AVATAR_TTS_MODEL. La prueba en vivo (RUN_LIVE=1) lo confirma con la llave.
  */
-export const DEFAULT_TTS_MODEL = 'gemini-3.1-flash-tts-preview';
+export const DEFAULT_TTS_MODEL = 'gemini-3.8-flash-tts';
 
 function fromEnv(env: NodeJS.ProcessEnv, name: string, fallback: string): string {
   const value = env[name];

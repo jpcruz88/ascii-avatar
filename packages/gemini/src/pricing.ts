@@ -10,7 +10,12 @@ export const IMAGE_RATES = {
   outputImagePerMTok: 30,
 } as const;
 
-/** Tarifas de la voz (TTS): entrada de texto, salida de audio y tokens por segundo de audio. */
+/**
+ * Tarifas de la voz (TTS): entrada de texto, salida de audio y tokens por segundo de audio.
+ * Para `gemini-3.8-flash-tts` la página de precios indica $0.50 / $9.00 por millón hasta el
+ * 2026-12-31 y $1.00 / $18.00 desde el 2027-01-01; estas cifras quedan por encima, así que
+ * el registro de gasto sobrestima un poco (lado seguro para el tope diario).
+ */
 export const TTS_RATES = {
   inputPerMTok: 1.0,
   outputAudioPerMTok: 20,
