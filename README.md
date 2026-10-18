@@ -11,9 +11,11 @@ Una cara hecha de caracteres de terminal para tu agente de IA. Subes una foto un
   |  Listo. Corregí el error y las      |    =@@%    __    %@@=  |
   |  pruebas pasan.                     |     +@@*.  \__/ .*@@+  |
   |                                     |      :*@@@%####%@@@*:  |
-  |                                     |  ana · voz: on · $0.012|
+  |                                     |                        |
   +-------------------------------------+------------------------+
         tu trabajo, como siempre              el panel del avatar
+
+  pie del panel:  ana · voz: on · gasto hoy: $0.012
 ```
 
 (Es solo una ilustración. La cara real sale de tu foto y se dibuja con color de 24 bits.)
@@ -29,8 +31,8 @@ Lo que hace y lo que no:
 
 - macOS (zsh o cualquier shell). Linux y Windows no están soportados todavía; la voz usa `afplay`, que es de macOS.
 - Una terminal con color de 24 bits (iTerm2, Ghostty, kitty, WezTerm, etc.) y un panel de unas 60 a 80 columnas. Menos de 20 columnas por 10 filas se considera demasiado pequeño.
-- Node.js 20.9 o superior para usar el comando `avatar`.
-- Node.js `^22.12`, `^24` o `>=26` solo si vas a desarrollar o correr las pruebas del repositorio.
+- Para construir el proyecto desde el clon (`npm install` y `npm run build`) y para correr las pruebas necesitas Node.js `^22.12`, `^24` o `>=26`, que es lo que exige el `package.json` de la raíz.
+- Una vez construido, el comando `avatar` solo necesita Node.js 20.9 o superior para ejecutarse.
 - Una llave de la API de Gemini (se consigue en https://aistudio.google.com/apikey). Una sola llave sirve para imágenes y voz.
 - Claude Code instalado, si quieres conectarlo con el panel.
 
@@ -87,12 +89,14 @@ avatar create ana --foto ~/Fotos/ana.jpg
 El nombre del agente va de 1 a 32 caracteres entre `a-z`, `0-9` y guion. Si omites `--foto`, el comando te la pide (acepta PNG, JPG o WebP de hasta 10 MB, con cada lado entre 256 y 8000 px; sirve arrastrar el archivo a la terminal). El flujo es:
 
 1. **Llave de Gemini.** Si no hay una guardada ni definida en `GEMINI_API_KEY`, te la pide sin mostrarla al escribir y la guarda en `~/.ascii-avatar/secrets.json` con permisos 0600 (la carpeta queda en 0700). La llave nunca se guarda dentro de la carpeta del agente ni en el repositorio.
-2. **Estimado y confirmación.** Antes de gastar nada muestra el costo estimado de las caras que faltan (alrededor de $0.28 USD para las ocho), el tope y lo que ya se gastó en ese agente. Solo continúa si respondes `s`, `si` o `sí`.
-3. **Vista previa barata.** Genera primero una sola cara, `mouth_open`, y la dibuja en la terminal. Si no se parece a ti o la definición no te convence, responde que no: solo gastaste una imagen (unos $0.034 USD) y puedes volver a intentarlo con otra foto.
+2. **Estimado y confirmación.** Antes de gastar nada muestra el costo estimado de las caras que faltan (unos $0.036 USD por cara, incluida la foto de entrada, y alrededor de $0.28 USD para las ocho), el tope y lo que ya se gastó en ese agente. Solo continúa si respondes `s`, `si` o `sí`.
+3. **Vista previa barata.** Genera primero una sola cara, `mouth_open`, y la dibuja en la terminal. Si no se parece a ti o la definición no te convence, responde que no: solo gastaste una imagen (unos $0.036 USD) y puedes volver a intentarlo con otra foto.
 4. **El resto.** Si apruebas, genera las otras siete caras. Cada una se guarda en disco y se registra su costo apenas termina.
 5. **Tope.** Si el gasto de creación de ese agente llegara a $1.60 USD, se detiene y avisa. Lo ya generado queda guardado.
 
-Si algo se interrumpe (falla la red, alcanzaste el tope, cerraste la terminal), basta con volver a correr el mismo comando: reutiliza la foto guardada y solo genera las caras que faltan. Nunca se vuelve a pagar por una cara ya hecha.
+Si algo se interrumpe (falla la red, cerraste la terminal), basta con volver a correr el mismo comando: reutiliza la foto guardada y solo genera las caras que faltan. Nunca se vuelve a pagar por una cara ya hecha.
+
+El tope sí es definitivo: el gasto de creación se acumula por agente, así que si ya llegaste a $1.60 USD, volver a correr `avatar create` se detiene de inmediato por el mismo tope. Las caras que falten tendrías que aportarlas tú con el [paquete de caras manual](#aportar-un-paquete-de-caras-manual).
 
 Al terminar, si no tenías ningún agente activo, el nuevo queda como agente activo en `~/.ascii-avatar/config.json`.
 
@@ -129,9 +133,9 @@ Qué cambia exactamente en el archivo:
 
 - Añade una entrada `{"matcher": "*", "hooks": [{"type": "command", "command": "...", "timeout": 5}]}` en `hooks.Stop` y otra en `hooks.UserPromptSubmit`. El comando es `"<ruta de node>" "<ruta del repo>/packages/cli/dist/bin.js" hook --from-ascii-avatar 2>/dev/null || true`, con rutas absolutas.
 - Conserva todo lo demás: tus otros hooks, tu modelo, tus permisos. Si el archivo o la carpeta no existen, los crea.
-- Reescribe el archivo con sangría de dos espacios, así que el formato de tus líneas puede cambiar aunque el contenido sea el mismo.
+- Reescribe el archivo conservando la sangría que ya tenía (dos espacios si no se puede deducir), así que el formato de algunas líneas, por ejemplo un objeto que tenías en una sola línea, puede cambiar aunque el contenido sea el mismo.
 - Antes de modificarlo guarda una copia de respaldo junto al original, con el nombre `settings.json.bak-<fecha y hora UTC>` (por ejemplo `settings.json.bak-20261018T215949601Z`) y te imprime su ruta. Si no cambia nada, no crea copia.
-- Es idempotente: correrlo otra vez dice que el hook ya estaba instalado y no duplica nada. Si cambiaste el repositorio de carpeta, vuelve a correrlo: reemplaza la entrada vieja.
+- Es idempotente: correrlo otra vez dice que el hook ya estaba instalado y no duplica nada. El comando guarda la ruta absoluta de `node` y la del repositorio, y sus errores se silencian a propósito (para no estorbar a Claude Code). Por eso, si mueves el repositorio o actualizas o cambias de versión de Node, vuelve a correr `avatar install-hook`: reemplaza la entrada vieja. Si no lo haces, el hook falla sin avisar y el panel simplemente deja de reaccionar.
 - Si el JSON de `settings.json` está roto o con una estructura inesperada, se detiene con un mensaje y no escribe nada.
 
 Para quitarlo:
@@ -189,8 +193,8 @@ Las tarifas son las de la documentación oficial de Gemini verificadas el 18 de 
 
 | Concepto | Cifra |
 | --- | --- |
-| Modelo de imágenes | `gemini-nano-banana-2.1`, a unos $0.034 USD por imagen de 1K |
-| Un agente completo (8 imágenes) | alrededor de $0.30 USD |
+| Modelo de imágenes | `gemini-nano-banana-2.1`, unos $0.036 USD por cara, incluida la foto de entrada (estimado) |
+| Un agente completo (8 imágenes) | alrededor de $0.28 a $0.30 USD |
 | Meta normal de creación | menos de $0.60 USD por agente |
 | Tope duro de creación | $1.60 USD por agente (unos 29 MXN) |
 | Voz | unos $0.03 USD por minuto (tarifa conservadora: el registro sobrestima un poco) |
@@ -201,7 +205,7 @@ Cómo se aplican:
 - **Creación.** Se muestra el estimado y se pide confirmación antes de gastar. Antes de cada imagen se comprueba que el gasto acumulado de ese agente más el de la imagen no pase de $1.60 USD; si pasara, se detiene. Cada imagen se registra en `~/.ascii-avatar/ledger.jsonl` en cuanto se cobra. Los costos se calculan con los tokens que reporta la API; si no los reporta, se marcan como "(estimado)".
 - **Voz.** Cada síntesis se registra en el mismo archivo. Al llegar al límite diario, el avatar deja de hablar por el resto del día (sigue gesticulando) y muestra "Límite diario de voz alcanzado". El día cuenta en hora local.
 - **Contador "gasto hoy".** El pie del panel muestra siempre lo gastado hoy en voz, en dólares con tres decimales.
-- **Cambiar el límite diario.** Edita `~/.ascii-avatar/config.json`:
+- **Cambiar el límite diario.** Cierra el panel (`q`), edita `~/.ascii-avatar/config.json` y vuelve a abrir el panel. El panel lee el archivo una sola vez al arrancar y, cuando pulsas `v`, lo reescribe con lo que tiene en memoria, así que un cambio hecho con el panel abierto no se aplica y puede perderse:
 
 ```json
 {
@@ -213,7 +217,7 @@ Cómo se aplican:
 }
 ```
 
-`dailyLimitUsd` es un número en dólares (0 desactiva la voz de hecho). `mode` y `cols` son los valores por defecto del panel; las opciones de `avatar panel` los sobrescriben. Un archivo ausente o con valores inválidos vuelve a los valores por defecto.
+`dailyLimitUsd` es un número en dólares (0 desactiva la voz de hecho). `mode` y `cols` son los valores por defecto del panel; las opciones de `avatar panel` los sobrescriben. Lo mismo vale para los tres: `dailyLimitUsd`, `mode` y `cols` se editan con el panel cerrado y se aplican al reabrirlo. Un archivo ausente o con valores inválidos vuelve a los valores por defecto.
 
 Los precios de un servicio externo cambian. Si ves que el gasto real se desvía de estas cifras, revisa `ledger.jsonl` y el panel de uso de tu cuenta de Google AI Studio.
 
@@ -312,13 +316,13 @@ Los ids de modelo se pueden cambiar sin tocar el código por si Google retira o 
 
 **"Voz bloqueada: no se pudo registrar el gasto".** El panel no pudo escribir en `~/.ascii-avatar/ledger.jsonl` (permisos, disco lleno). Sin ese registro no se puede hacer cumplir el límite, así que la voz se bloquea hasta que reinicies el panel. Arregla el permiso o el espacio y vuelve a abrirlo.
 
-**"Límite diario de voz alcanzado".** Ya se gastó el límite de hoy. Sube `dailyLimitUsd` en `config.json` o espera al día siguiente. Mientras tanto el avatar sigue gesticulando.
+**"Límite diario de voz alcanzado".** Ya se gastó el límite de hoy. Cierra el panel, sube `dailyLimitUsd` en `config.json` y ábrelo de nuevo (el panel solo lee ese valor al arrancar), o espera al día siguiente. Mientras tanto el avatar sigue gesticulando.
 
 **"Gemini rechazó el texto; sin voz esta vez".** El filtro de Gemini no aceptó ese resumen. Pasa de vez en cuando; la siguiente respuesta funciona normal.
 
 **Gemini rechazó la foto (al crear).** Llega un mensaje como "Gemini rechazó editar la foto (probable filtro de contenido)". Prueba con otra foto (frontal, bien iluminada, una sola persona) o usa el paquete manual descrito arriba; el mensaje te da la ruta exacta de `faces/` y los ocho nombres.
 
-**El panel no reacciona a Claude Code.** Revisa, en orden: que corriste `avatar install-hook`; que reiniciaste las sesiones de Claude Code después; que el panel está abierto; y que `ASCII_AVATAR_HOME`, si la usas, es la misma en ambos lados. Puedes probar el hook a mano con el panel abierto:
+**El panel no reacciona a Claude Code.** Revisa, en orden: que corriste `avatar install-hook` (y que lo volviste a correr si moviste el repositorio o cambiaste de versión de Node: el hook guarda la ruta absoluta de `node`, y sus errores no se muestran); que reiniciaste las sesiones de Claude Code después; que el panel está abierto; y que `ASCII_AVATAR_HOME`, si la usas, es la misma en ambos lados. Puedes probar el hook a mano con el panel abierto:
 
 ```sh
 echo '{"hook_event_name":"Stop","last_assistant_message":"Hecho. Todo funciona bien."}' | node packages/cli/dist/bin.js hook
@@ -329,11 +333,11 @@ No imprime nada y sale con código 0, pero el panel debe reaccionar.
 **Verificar el contrato real del hook de Claude Code.** El avatar espera que el evento `Stop` entregue por stdin un JSON con `hook_event_name: "Stop"` y `last_assistant_message` (el texto del último mensaje del asistente). Para confirmarlo en tu versión de Claude Code:
 
 1. Respalda tu configuración: `cp ~/.claude/settings.json ~/.claude/settings.json.mio-bak`.
-2. Añade a mano en `hooks.Stop` una entrada temporal: `{"matcher":"*","hooks":[{"type":"command","command":"cat > /tmp/hook-stdin.json","timeout":5}]}`.
+2. Crea el archivo antes con permisos restringidos (`touch ~/hook-stdin.json && chmod 600 ~/hook-stdin.json`; guardará el texto de tu respuesta). Añade a mano en `hooks.Stop` una entrada temporal: `{"matcher":"*","hooks":[{"type":"command","command":"cat > ~/hook-stdin.json","timeout":5}]}`.
 3. Abre una sesión nueva de Claude Code, haz una pregunta corta y espera la respuesta.
-4. Corre `cat /tmp/hook-stdin.json | python3 -m json.tool` y confirma que existe `last_assistant_message` con el texto de la respuesta y que `hook_event_name` es `"Stop"`.
+4. Corre `cat ~/hook-stdin.json | python3 -m json.tool` y confirma que existe `last_assistant_message` con el texto de la respuesta y que `hook_event_name` es `"Stop"`.
 5. Si no existe, el texto habría que leerlo del último mensaje del asistente en `transcript_path` (un archivo JSONL); eso requeriría ajustar `extractHookMessage` en `packages/cli/src/commands/hook.ts`, junto con su prueba. Abre un issue con la salida del paso 4.
-6. Quita la entrada temporal (o restaura el respaldo) y borra `/tmp/hook-stdin.json`.
+6. Quita la entrada temporal (o restaura el respaldo) y borra `~/hook-stdin.json` (`rm ~/hook-stdin.json`).
 
 ## Privacidad
 
