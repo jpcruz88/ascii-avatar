@@ -62,6 +62,9 @@ function storedPhotoPath(root: string, name: string): string {
   throw new CreateFailure(`El agente "${name}" no tiene su foto guardada. Pásala con la ruta de la foto.`);
 }
 
+const AUTH_FAILURE = /api key|API_KEY|permission|unauth|401|403/i;
+const KEY_HINT = 'Revisa tu llave: borra ~/.ascii-avatar/secrets.json y vuelve a correr avatar create.';
+
 /** Texto corto y sin llaves de API ni trazas, para mostrar un error inesperado. */
 function safeMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
@@ -69,7 +72,8 @@ function safeMessage(error: unknown): string {
     .replace(/AIza[0-9A-Za-z_-]{20,}/g, '[llave oculta]')
     .replace(/([?&]key=)[^\s&]+/gi, '$1[oculta]')
     .trim();
-  return clean.length > 200 ? `${clean.slice(0, 200)}…` : clean;
+  const short = clean.length > 200 ? `${clean.slice(0, 200)}…` : clean;
+  return AUTH_FAILURE.test(raw.split('\n')[0] ?? '') ? `${short.replace(/\.$/, '')}. ${KEY_HINT}` : short;
 }
 
 const usd = (n: number): string => n.toFixed(2);
@@ -94,8 +98,18 @@ export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
       if (missing.length === 0) {
         return { status: 'done', message: `El agente "${name}" ya tiene las ${FACE_IDS.length} caras. No hay nada que generar.` };
       }
-      out('Se reutiliza la foto guardada del agente.');
       photo = await readPhoto(storedPhotoPath(root, name));
+      if (deps.photoPath !== undefined) {
+        const given = await readPhoto(deps.photoPath);
+        if (!given.buf.equals(photo.buf)) {
+          throw new CreateFailure(
+            `El agente "${name}" ya tiene otra foto guardada y no se puede cambiar. ` +
+              `Usa otro nombre para empezar con la foto nueva, o borra la carpeta ${agentDir} para empezar de cero. ` +
+              'No se gastó nada.',
+          );
+        }
+      }
+      out('Se reutiliza la foto guardada del agente.');
     } else {
       if (deps.photoPath === undefined) {
         throw new CreateFailure(`El agente "${name}" no existe: indica la ruta de la foto para crearlo.`);
@@ -166,7 +180,7 @@ export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
     if (error instanceof ImageInputError) return { status: 'failed', message: error.message };
     return {
       status: 'failed',
-      message: `No se pudo completar la creación: ${safeMessage(error)}. Lo ya generado quedó guardado; al volver a correr solo se generan las caras que faltan.`,
+      message: `No se pudo completar la creación: ${safeMessage(error).replace(/\.$/, '')}. Lo ya generado quedó guardado; al volver a correr solo se generan las caras que faltan.`,
     };
   }
 }

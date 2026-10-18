@@ -249,6 +249,26 @@ describe('runCreate: errores y reanudación', () => {
     expect(result.message).not.toContain('AIza' + 'SyA1234567890');
   });
 
+  it('ante un error de autenticación añade cómo cambiar la llave, sin filtrarla', async () => {
+    const client: ImageClient = {
+      async editImage() {
+        throw new Error('API key not valid. key=AIza' + 'SyA1234567890abcdefghijklmnopqrstuv');
+      },
+    };
+    const result = await runCreate(makeDeps({ imageClient: client }));
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain(
+      'Revisa tu llave: borra ~/.ascii-avatar/secrets.json y vuelve a correr avatar create.',
+    );
+    expect(result.message).not.toContain('AIza' + 'SyA1234567890');
+  });
+
+  it('un error de red no añade la pista de la llave', async () => {
+    const result = await runCreate(makeDeps({ imageClient: fakeClient({ failOn: [1] }) }));
+    expect(result.status).toBe('failed');
+    expect(result.message).not.toContain('Revisa tu llave');
+  });
+
   it('un rechazo de Gemini explica cómo poner las 8 caras a mano', async () => {
     const result = await runCreate(makeDeps({ imageClient: fakeClient({ refuse: true }) }));
     expect(result.status).toBe('failed');
@@ -279,6 +299,34 @@ describe('runCreate: errores y reanudación', () => {
     const questions = events.filter((e) => e.startsWith('ask:'));
     expect(questions).toHaveLength(1);
     expect(questions[0]).toContain('¿Generar las caras? (s/N)');
+  });
+
+  it('con otra foto sobre un agente existente falla sin preguntar ni gastar y nombra la carpeta', async () => {
+    expect((await runCreate(makeDeps({ answers: [true, false] }))).status).toBe('declined');
+    const before = calls;
+    const spentBefore = new Ledger(join(root, 'ledger.jsonl')).spentCreation('luna');
+    const otherPath = join(root, 'otra.png');
+    writeFileSync(otherPath, await sharp({
+      create: { width: 512, height: 512, channels: 3, background: { r: 10, g: 200, b: 30 } },
+    }).png().toBuffer());
+    events.length = 0;
+    const result = await runCreate(makeDeps({ photoPath: otherPath }));
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('"luna"');
+    expect(result.message).toContain('otra foto');
+    expect(result.message).toContain(join(root, 'agents', 'luna'));
+    expect(calls).toBe(before);
+    expect(new Ledger(join(root, 'ledger.jsonl')).spentCreation('luna')).toBe(spentBefore);
+    expect(events.some((e) => e.startsWith('ask:'))).toBe(false);
+    expect(missingFaces(root, 'luna')).toHaveLength(7);
+  });
+
+  it('con la misma foto sobre un agente existente reanuda con normalidad', async () => {
+    expect((await runCreate(makeDeps({ answers: [true, false] }))).status).toBe('declined');
+    const before = calls;
+    const result = await runCreate(makeDeps({ photoPath }));
+    expect(result.status).toBe('done');
+    expect(calls - before).toBe(7);
   });
 
   it('un agente nuevo sin photoPath falla sin gastar', async () => {
