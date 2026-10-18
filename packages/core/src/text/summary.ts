@@ -1,3 +1,5 @@
+import { codeFreeLines, runLength } from './code.js';
+
 /** Máximo de caracteres que el avatar dice en voz alta por defecto. */
 const DEFAULT_MAX_CHARS = 220;
 
@@ -21,10 +23,17 @@ const HEADING_MARK = /^#{1,6}\s+/;
 const LIST_MARK = /^(?:[-*+•]|\d{1,3}[.)])\s+/;
 const CHECKBOX = /^\[[ xX]\]\s+/;
 const URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]{0,20}:\/\//;
+const DATA_URL = /^data:[^/\s]{1,60}\//i;
+/** `data:image/png;base64,…` suelto (puede ser enorme: va antes de imágenes y enlaces). */
+const DATA_URI = /\bdata:[A-Za-z0-9.+-]{1,60}\/[A-Za-z0-9.+-]{1,60}[^\s)]*/gi;
+/** Marca de comprobación que `pickExpression` necesita ver. */
+const CHECK_MARKS = new Set(['\u2713', '\u2714']);
+const MIN_OPAQUE_LENGTH = 20;
 const WINDOWS_PATH = /^[A-Za-z]:[\\/]/;
-const PATH_SEGMENT = /^[\p{L}\p{N}_.@~+-]+$/u;
+const PATH_SEGMENT = /^[\p{L}\p{N}_.@~+$=[\](){}-]+$/u;
 const FILE_EXTENSION = /\.[\p{L}\p{N}]{1,8}$/u;
 const HAS_WORD = /[\p{L}\p{N}]/u;
+const LETTER = /\p{L}/u;
 
 /** Cierres que pueden seguir a un signo de fin de frase. */
 const CLOSERS = new Set([')', ']', '"', "'", '”', '’', '»']);
@@ -40,89 +49,6 @@ const SYMBOL_ONLY = new Set(['-', '=', '|', '#', '>', '+']);
 function normalizeMax(maxChars: number | undefined): number {
   if (maxChars === undefined || !Number.isFinite(maxChars) || maxChars < 1) return DEFAULT_MAX_CHARS;
   return Math.floor(maxChars);
-}
-
-function runLength(text: string, from: number, char: string): number {
-  let end = from;
-  while (end < text.length && text[end] === char) end++;
-  return end - from;
-}
-
-/** Valla de código que abre en esta línea (` ``` ` o `~~~`), o `null`. */
-function openingFence(trimmed: string): { char: string; length: number } | null {
-  const char = trimmed[0];
-  if (char !== '`' && char !== '~') return null;
-  const length = runLength(trimmed, 0, char);
-  if (length < 3) return null;
-  // Una valla de acentos graves no lleva acentos graves en la línea: eso es código en línea.
-  if (char === '`' && trimmed.includes('`', length)) return null;
-  return { char, length };
-}
-
-function closesFence(trimmed: string, fence: { char: string; length: number }): boolean {
-  if (trimmed[0] !== fence.char) return false;
-  const length = runLength(trimmed, 0, fence.char);
-  return length >= fence.length && trimmed.slice(length).trim() === '';
-}
-
-/** Quita los tramos entre rachas de acentos graves de igual longitud, y los acentos sueltos. */
-function stripInlineCode(line: string): string {
-  if (!line.includes('`')) return line;
-  const runs: { start: number; length: number }[] = [];
-  for (let i = 0; i < line.length; ) {
-    if (line[i] === '`') {
-      const length = runLength(line, i, '`');
-      runs.push({ start: i, length });
-      i += length;
-    } else i++;
-  }
-  // Para cada racha, la siguiente de la misma longitud (una sola pasada hacia atrás).
-  const next: (number | undefined)[] = new Array<number | undefined>(runs.length);
-  const seen = new Map<number, number>();
-  for (let k = runs.length - 1; k >= 0; k--) {
-    next[k] = seen.get(runs[k]!.length);
-    seen.set(runs[k]!.length, k);
-  }
-  let out = '';
-  let cursor = 0;
-  for (let k = 0; k < runs.length; k++) {
-    const run = runs[k]!;
-    const close = next[k];
-    out += line.slice(cursor, run.start);
-    if (close === undefined) {
-      cursor = run.start + run.length; // sin pareja: se descartan los acentos
-    } else {
-      const closing = runs[close]!;
-      out += ' ';
-      cursor = closing.start + closing.length;
-      k = close;
-    }
-  }
-  return out + line.slice(cursor);
-}
-
-/**
- * Líneas del texto sin bloques de código (``` y ~~~; una valla sin cerrar descarta todo lo que
- * sigue) y sin código en línea.
- */
-export function codeFreeLines(text: string): string[] {
-  const out: string[] = [];
-  let fence: { char: string; length: number } | null = null;
-  for (const line of text.split(/\r\n|\r|\n/)) {
-    const trimmed = line.trimStart();
-    if (fence !== null) {
-      if (closesFence(trimmed, fence)) fence = null;
-      continue;
-    }
-    fence = openingFence(trimmed);
-    if (fence === null) out.push(stripInlineCode(line));
-  }
-  return out;
-}
-
-/** El texto sin bloques de código ni código en línea. */
-export function removeCode(text: string): string {
-  return codeFreeLines(text).join('\n');
 }
 
 function isTableRow(line: string): boolean {
@@ -145,10 +71,27 @@ function isRule(line: string): boolean {
 }
 
 function isUrl(core: string): boolean {
-  return core.slice(0, 4).toLowerCase() === 'www.' || URL_SCHEME.test(core);
+  const lower = core.slice(0, 7).toLowerCase();
+  return (
+    lower.startsWith('www.') || lower === 'mailto:' || URL_SCHEME.test(core) || DATA_URL.test(core)
+  );
 }
 
-function isPath(core: string): boolean {
+/** Quita un sufijo `:42` o `:10:5` (línea y columna) de una ruta. */
+function withoutLineNumbers(core: string): string {
+  let end = core.length;
+  for (;;) {
+    let digits = end;
+    while (digits > 0 && core.charCodeAt(digits - 1) >= 48 && core.charCodeAt(digits - 1) <= 57) {
+      digits--;
+    }
+    if (digits < end && digits > 0 && core[digits - 1] === ':') end = digits - 1;
+    else return core.slice(0, end);
+  }
+}
+
+function isPath(token: string): boolean {
+  const core = withoutLineNumbers(token);
   if (core.length < 2) return false;
   if (core.startsWith('/') || core.startsWith('~/') || core.startsWith('./') || core.startsWith('../')) {
     return true;
@@ -181,9 +124,37 @@ function withoutMarks(text: string, marks: ReadonlySet<string>): string {
 const EMPHASIS_LEADING = new Set(['*', '_']);
 const EMPHASIS_TRAILING = new Set(['*', '_', '~']);
 
-/** Quita rutas, URLs, marcas sueltas y énfasis palabra por palabra. */
+/** Cadena larga que mezcla letras y dígitos: llaves de API, hashes, base64… */
+function isOpaque(core: string): boolean {
+  if (core.length < MIN_OPAQUE_LENGTH) return false;
+  let letters = false;
+  let digits = false;
+  for (let i = 0; i < core.length && !(letters && digits); i++) {
+    const code = core.charCodeAt(i);
+    if (code >= 48 && code <= 57) digits = true;
+    else if (LETTER.test(core[i]!)) letters = true;
+  }
+  return letters && digits;
+}
+
+/** Posición del `=` en `CLAVE=valor` (clave de identificador y valor no vacío), o -1. */
+function assignmentAt(word: string): number {
+  const equals = word.indexOf('=');
+  if (equals < 1 || equals === word.length - 1) return -1;
+  for (let i = 0; i < equals; i++) {
+    const code = word.charCodeAt(i);
+    const isDigit = code >= 48 && code <= 57;
+    const isIdentifier = isDigit || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95;
+    if (!isIdentifier || (i === 0 && isDigit)) return -1;
+  }
+  return equals;
+}
+
+/** Quita rutas, URLs, secretos, marcas sueltas y énfasis palabra por palabra. */
 function cleanTokens(line: string): string {
   const out: string[] = [];
+  let skipNext = false; // el valor que sigue a `Bearer`
+  let openQuote: string | null = null; // valor entre comillas que sigue en otra palabra
   for (const token of line.split(/\s+/)) {
     if (token === '') continue;
     let start = 0;
@@ -193,11 +164,28 @@ function cleanTokens(line: string): string {
     const core = token.slice(start, end);
     const trail = token.slice(end);
 
-    const dropped =
-      core === '' ||
-      isUrl(core) ||
-      isPath(core) ||
-      onlySymbols(core);
+    let dropped = false;
+    if (openQuote !== null) {
+      dropped = true;
+      if (token.includes(openQuote)) openQuote = null;
+    } else if (skipNext) {
+      dropped = true;
+      skipNext = false;
+    } else if (core.length === 6 && core.toLowerCase() === 'bearer') {
+      dropped = true;
+      skipNext = true;
+    } else {
+      const equals = assignmentAt(token.slice(start));
+      if (equals > 0) {
+        dropped = true;
+        const quote = token[start + equals + 1]!;
+        if ((quote === '"' || quote === "'") && token.indexOf(quote, start + equals + 2) === -1) {
+          openQuote = quote;
+        }
+      } else {
+        dropped = core === '' || isUrl(core) || isPath(core) || onlySymbols(core) || isOpaque(core);
+      }
+    }
     if (dropped) {
       // Conserva el punto final de la frase para no pegar frases entre sí.
       const kept = keptTerminators(trail);
@@ -212,17 +200,27 @@ function cleanTokens(line: string): string {
   return out.join(' ');
 }
 
-function cleanLine(raw: string): string {
+function cleanLine(raw: string, keepChecks: boolean): string {
   let line = raw.trim();
   if (line === '' || isTableRow(line) || isRule(line)) return '';
   while (line.startsWith('>')) line = line.slice(1).trimStart();
   line = line.replace(HEADING_MARK, '').replace(LIST_MARK, '').replace(CHECKBOX, '');
   line = line
+    .replace(DATA_URI, '')
     .replace(IMAGE, ' ')
     .replace(LINK, '$1')
     .replace(HTML_TAG, ' ')
-    .replace(PICTOGRAPH, ' ');
+    .replace(PICTOGRAPH, (mark) => (keepChecks && CHECK_MARKS.has(mark) ? mark : ' '));
   return cleanTokens(line);
+}
+
+/**
+ * Líneas de prosa: sin código, rutas, URLs, secretos, tablas, HTML, marcas de markdown ni emoji.
+ * Con `keepChecks` conserva `✓`/`✔` (para `pickExpression`). Las líneas vacías se mantienen.
+ */
+export function proseLines(text: string, keepChecks = false): string[] {
+  const clean = text.replace(LONE_SURROGATE, ' ').replace(INVISIBLE, ' ');
+  return codeFreeLines(clean).map((raw) => cleanLine(raw, keepChecks));
 }
 
 /** Parte una línea ya limpia (palabras separadas por un espacio) en frases. */
@@ -267,10 +265,9 @@ function cutSentence(sentence: string, maxChars: number): string {
  */
 export function spokenSummary(text: string, opts: { maxChars?: number } = {}): string {
   const maxChars = normalizeMax(opts.maxChars);
-  const clean = text.replace(LONE_SURROGATE, ' ').replace(INVISIBLE, ' ');
   let summary = '';
-  for (const raw of codeFreeLines(clean)) {
-    for (const sentence of splitSentences(cleanLine(raw))) {
+  for (const line of proseLines(text)) {
+    for (const sentence of splitSentences(line)) {
       if (!HAS_WORD.test(sentence)) continue;
       if (summary === '') {
         if (sentence.length > maxChars) return cutSentence(sentence, maxChars).replace(LONE_SURROGATE, '');

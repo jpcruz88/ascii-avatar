@@ -56,6 +56,55 @@ describe('spokenSummary', () => {
     expect(spokenSummary(input)).toBe(expected);
   });
 
+  it.each([
+    ['Mira src/app/main.ts:42 ahora.', 'Mira ahora.'],
+    ['Falla en src/a.ts:10:5 siempre.', 'Falla en siempre.'],
+    ['Abre app/[id]/page.tsx hoy.', 'Abre hoy.'],
+    ['Abre app/(auth)/login/page.tsx hoy.', 'Abre hoy.'],
+    ['Mira /Users/x/a.ts:7.', 'Mira.'],
+  ])('quita rutas con línea o corchetes: %j', (input, expected) => {
+    expect(spokenSummary(input)).toBe(expected);
+  });
+
+  it('no trata la hora o los dos puntos como parte de una ruta', () => {
+    expect(spokenSummary('Son las 10:30 y y/o 1/2.')).toBe('Son las 10:30 y y/o 1/2.');
+  });
+
+  it.each([
+    ['Mi llave es sk-ant' + '-api03-AbCdEf1234567890xyzABC fin.', 'Mi llave es fin.'],
+    ['El token ghp' + '_1A2b3C4d5E6f7G8h9I0jKlMnOpQrStUvWxYz sirve.', 'El token sirve.'],
+    ['Acceso AKIAIOSFODNN7EXAMPLE listo.', 'Acceso listo.'],
+    ['Hash deadbeef0123456789abcdef0123 ok.', 'Hash ok.'],
+    ['Datos dGhpcyBpcyBhIHNlY3JldCBrZXk0Mg== fin.', 'Datos fin.'],
+  ])('quita secretos y cadenas opacas: %j', (input, expected) => {
+    expect(spokenSummary(input)).toBe(expected);
+  });
+
+  it('conserva palabras largas sin dígitos y tokens cortos con dígitos', () => {
+    expect(spokenSummary('Electroencefalografista anticonstitucionalmente v2 abc123.')).toBe(
+      'Electroencefalografista anticonstitucionalmente v2 abc123.',
+    );
+  });
+
+  it('quita asignaciones CLAVE=valor, también con comillas', () => {
+    expect(spokenSummary('Pon API_KEY=abc123 y luego sigue.')).toBe('Pon y luego sigue.');
+    expect(spokenSummary('Pon TOKEN="uno dos tres" y sigue.')).toBe('Pon y sigue.');
+    expect(spokenSummary("Pon SECRET='uno dos' y sigue.")).toBe('Pon y sigue.');
+    expect(spokenSummary('Pon A="ya cerrado" y sigue.')).toBe('Pon y sigue.');
+  });
+
+  it('quita el valor tras Bearer', () => {
+    expect(spokenSummary('Authorization: Bearer abc.def.ghi y listo.')).toBe('Authorization: y listo.');
+    expect(spokenSummary('Cabecera bearer xyz fin.')).toBe('Cabecera fin.');
+  });
+
+  it('trata data: y mailto: como URLs', () => {
+    expect(spokenSummary('Mira data:image/png;base64,iVBORw0KGgo= aquí.')).toBe('Mira aquí.');
+    expect(spokenSummary('Escribe a mailto:a@b.com hoy.')).toBe('Escribe a hoy.');
+    const big = `Logo ![x](data:image/png;base64,${'A1b2'.repeat(2000)}) fin.`;
+    expect(spokenSummary(big)).toBe('Logo fin.');
+  });
+
   it('no confunde palabras con barra con rutas', () => {
     expect(spokenSummary('Usa entrada/salida y/o TCP/IP.')).toBe('Usa entrada/salida y/o TCP/IP.');
   });
@@ -179,6 +228,11 @@ describe('spokenSummary', () => {
       'x/'.repeat(100_000),
       ' '.repeat(200_000) + 'fin',
       '```\n'.repeat(40_000),
+      ':1'.repeat(100_000) + 'x',
+      'API_KEY="'.repeat(30_000),
+      'bearer '.repeat(30_000),
+      'data:a/'.repeat(30_000),
+      'a1'.repeat(100_000),
     ];
     for (const input of inputs) {
       const start = performance.now();
