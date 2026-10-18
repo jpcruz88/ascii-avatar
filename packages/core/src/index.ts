@@ -19,3 +19,11 @@ export {
 } from './agent/store.js';
 export type { AgentConfig, CreateAgentOptions } from './agent/store.js';
 export { loadApiKey, saveApiKey } from './agent/secrets.js';
+export {
+  BudgetExceededError,
+  CREATION_CAP_USD,
+  DEFAULT_DAILY_LIMIT_USD,
+  Ledger,
+  assertWithinCap,
+} from './budget/ledger.js';
+export type { SpendKind } from './budget/ledger.js';
