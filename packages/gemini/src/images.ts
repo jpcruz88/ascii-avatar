@@ -1,6 +1,12 @@
 import { GoogleGenAI } from '@google/genai';
 import type { FaceId } from '@ascii-avatar/core';
 import type { GeminiConfig } from './config.js';
+import {
+  extractUsage,
+  refusalDetail,
+  type InteractionResultBase,
+  type InteractionsApi,
+} from './interactions.js';
 import { ESTIMATED_FACE_COST_USD, imageCostUsd } from './pricing.js';
 import { FACE_PROMPTS } from './prompts.js';
 
@@ -44,32 +50,8 @@ export interface ImageClient {
  */
 export const IMAGE_SIZE = '1K';
 
-/** Lo mínimo del SDK que usamos; permite inyectar un falso en las pruebas. */
-export interface InteractionsApi {
-  interactions: { create(params: unknown): Promise<unknown> };
-}
-
-interface InteractionResult {
+interface InteractionResult extends InteractionResultBase {
   output_image?: { data?: string };
-  output_text?: string;
-  status?: string;
-  errors?: Array<{ code?: string; message?: string }>;
-  usage?: {
-    total_input_tokens?: number;
-    total_output_tokens?: number;
-    total_thought_tokens?: number;
-  };
-}
-
-function refusalDetail(result: InteractionResult): string | undefined {
-  const parts: string[] = [];
-  if (result.output_text) parts.push(result.output_text);
-  if (result.status && result.status !== 'completed') parts.push(`estado: ${result.status}`);
-  for (const e of result.errors ?? []) {
-    const text = [e.code, e.message].filter(Boolean).join(': ');
-    if (text) parts.push(text);
-  }
-  return parts.length > 0 ? parts.join(' | ') : undefined;
 }
 
 export function createGeminiImageClient(
@@ -90,18 +72,10 @@ export function createGeminiImageClient(
       const data = result.output_image?.data;
       if (data === undefined || data === '') throw new ImageRefusedError(refusalDetail(result));
 
-      // Sin uso no se pierde una imagen ya pagada: los tokens faltantes van en null.
-      // Los tokens de pensamiento se suman a la salida. Si `total_output_tokens` ya
-      // los incluyera, se sobrestima el costo, lo cual es seguro para el tope de
-      // presupuesto. La primera corrida real debe compararse con la consola de facturación.
-      const usage = result.usage;
-      const outputTokens =
-        usage?.total_output_tokens === undefined
-          ? null
-          : usage.total_output_tokens + (usage.total_thought_tokens ?? 0);
+      const { inputTokens, outputTokens } = extractUsage(result.usage);
       return {
         png: Buffer.from(data, 'base64'),
-        inputTokens: usage?.total_input_tokens ?? null,
+        inputTokens,
         outputTokens,
       };
     },

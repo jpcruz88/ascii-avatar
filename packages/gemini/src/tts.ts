@@ -1,7 +1,12 @@
 import { GoogleGenAI } from '@google/genai';
 import { parseWav } from '@ascii-avatar/core';
 import type { GeminiConfig } from './config.js';
-import type { InteractionsApi } from './images.js';
+import {
+  extractUsage,
+  refusalDetail,
+  type InteractionResultBase,
+  type InteractionsApi,
+} from './interactions.js';
 import { TTS_RATES } from './pricing.js';
 
 /** Voz por defecto de la API de voz de Gemini. */
@@ -47,27 +52,8 @@ export interface TtsClient {
   speak(input: SpeechInput): Promise<SpeechResult>;
 }
 
-interface SpeechInteraction {
+interface SpeechInteraction extends InteractionResultBase {
   output_audio?: { data?: string };
-  output_text?: string;
-  status?: string;
-  errors?: Array<{ code?: string; message?: string }>;
-  usage?: {
-    total_input_tokens?: number;
-    total_output_tokens?: number;
-    total_thought_tokens?: number;
-  };
-}
-
-function refusalDetail(result: SpeechInteraction): string | undefined {
-  const parts: string[] = [];
-  if (result.output_text) parts.push(result.output_text);
-  if (result.status && result.status !== 'completed') parts.push(`estado: ${result.status}`);
-  for (const e of result.errors ?? []) {
-    const text = [e.code, e.message].filter(Boolean).join(': ');
-    if (text) parts.push(text);
-  }
-  return parts.length > 0 ? parts.join(' | ') : undefined;
 }
 
 export function createGeminiTtsClient(
@@ -84,19 +70,14 @@ export function createGeminiTtsClient(
       })) as SpeechInteraction;
 
       const data = result.output_audio?.data;
-      if (data === undefined || data === '') throw new SpeechRefusedError(refusalDetail(result));
+      const wav = data === undefined ? Buffer.alloc(0) : Buffer.from(data, 'base64');
+      // Sin datos, o datos que decodifican a cero bytes, no hay audio que reproducir ni cobrar.
+      if (wav.length === 0) throw new SpeechRefusedError(refusalDetail(result));
 
-      // Sin uso no se pierde un audio ya pagado: los tokens faltantes van en null.
-      // Los tokens de pensamiento (si los hubiera) se suman a la salida: si
-      // `total_output_tokens` ya los incluyera se sobrestima, lo cual es seguro para el tope.
-      const usage = result.usage;
-      const outputTokens =
-        usage?.total_output_tokens === undefined
-          ? null
-          : usage.total_output_tokens + (usage.total_thought_tokens ?? 0);
+      const { inputTokens, outputTokens } = extractUsage(result.usage);
       return {
-        wav: Buffer.from(data, 'base64'),
-        inputTokens: usage?.total_input_tokens ?? null,
+        wav,
+        inputTokens,
         outputTokens,
       };
     },
@@ -118,6 +99,7 @@ export function ttsCostUsd(inputTokens: number, outputTokens: number): number {
 function estimateSpeechCostUsd(wav: Buffer, text: string): number {
   try {
     const { sampleRate, samples } = parseWav(wav);
+    if (samples.length === 0) return FALLBACK_SPEECH_COST_USD;
     const seconds = samples.length / sampleRate;
     const outputTokens = seconds * TTS_RATES.audioTokensPerSecond;
     const inputTokens = Math.ceil(text.length / 4);

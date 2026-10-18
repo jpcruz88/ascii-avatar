@@ -153,6 +153,14 @@ describe('createGeminiTtsClient', () => {
     expect((error as SpeechRefusedError).detail).toBeUndefined();
   });
 
+  it('trata datos base64 no vacíos que decodifican a cero bytes como rechazo', async () => {
+    const { ai } = apiReturning({ output_audio: { data: '==' } });
+
+    await expect(
+      createGeminiTtsClient(cfg, ai).speak({ text: 'Hola', voice: 'Kore' }),
+    ).rejects.toBeInstanceOf(SpeechRefusedError);
+  });
+
   it('deja pasar los errores de red sin envolverlos', async () => {
     const boom = new Error('sin red');
     const ai: InteractionsApi = {
@@ -222,6 +230,15 @@ describe('synthesizeSpeech', () => {
       inputTokens: null,
       outputTokens: null,
     });
+
+    const result = await synthesizeSpeech(client, 'Hola', 'Kore');
+
+    expect(result.costUsd).toBe(0.01);
+    expect(result.costEstimated).toBe(true);
+  });
+
+  it('usa 0.01 USD si el WAV es válido pero no tiene muestras', async () => {
+    const { client } = clientWith({ wav: silentWav(0), inputTokens: null, outputTokens: null });
 
     const result = await synthesizeSpeech(client, 'Hola', 'Kore');
 
