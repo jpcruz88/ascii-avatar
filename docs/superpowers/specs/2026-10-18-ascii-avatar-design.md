@@ -42,7 +42,7 @@ Investigación previa (resumen): no se encontró un proyecto que junte foto → 
 ## 3. Restricciones
 
 - **Presupuesto por agente:** el usuario fijó 30 a 40 MXN. Con el dólar a ~18.4 MXN (16-oct-2026) son ~$1.63 a ~$2.17 USD. **Tope duro por defecto: $1.60 USD** (~29 MXN), configurable. **Meta normal: menos de $0.60 USD** (~11 MXN).
-- **Costo orientativo de Gemini** (fuentes de terceros, a verificar en la documentación oficial al construir): ~$0.039 USD por imagen con Gemini 2.5 Flash Image, ~la mitad en modo por lotes. 12 imágenes ≈ $0.47 USD. Puede haber cargos adicionales por imagen de referencia de entrada: verificar.
+- **Costo de Gemini** (documentación oficial, 2026-10-18): `gemini-2.5-flash-image` fue retirado el 2-oct-2026; el modelo vigente es `gemini-nano-banana-2.1`, ~$0.0336 USD por imagen de 1K (~$0.0168 por lotes), más ~$1.50 por millón de tokens de entrada. 8 imágenes ≈ $0.30 USD. Voz: el audio de salida cuesta ~$20 por millón de tokens a 25 tokens por segundo (~$0.03 por minuto). Los ids de modelo y las tarifas viven en configuración, no en el código.
 - **Local y sin servidor propio.** Todo corre en la máquina del usuario.
 - **Terminal objetivo:** la del usuario (macOS, zsh; iTerm presente). Debe usar color de 24 bits. Habrá que definir un mínimo soportado para otras terminales.
 - **El repo es abierto:** ningún secreto en el código; la llave de Gemini vive en el equipo del usuario, nunca en el repo ni en el paquete del agente.
@@ -65,7 +65,7 @@ Investigación previa (resumen): no se encontró un proyecto que junte foto → 
 Las marco como **llamadas mías** para que se revisen.
 
 - **TypeScript en todo**, por correr igual en Node (terminal) y navegador (web futura).
-- **Monorepo con pnpm** y paquetes: `core` (foto/paquete → cuadros ASCII, sincronía de boca), `cli` (terminal: crear agente, mostrar panel, interruptor de voz), `adapters` (Gemini en V1; interfaz abierta), y `web` (reservado para después).
+- **Monorepo con npm workspaces** (corrección: antes decía pnpm; Node 25+ ya no trae corepack y así no se exige otra herramienta) y paquetes: `core` (foto/paquete → cuadros ASCII, sincronía de boca), `cli` (terminal: crear agente, mostrar panel, interruptor de voz), `adapters` (Gemini en V1; interfaz abierta), y `web` (reservado para después).
 - **Render en terminal:** ANSI con color de 24 bits y caracteres de medio bloque/braille para la definición.
 - **Licencia MIT.**
 - **Pruebas** con Vitest (y Playwright cuando exista la web), siguiendo el TDD del usuario.
@@ -79,6 +79,8 @@ Las marco como **llamadas mías** para que se revisen.
 ## 6. Paquete de caras (el corazón del diseño)
 
 Cada agente guarda en su carpeta un paquete de imágenes, todas con **la misma cámara, pose, luz y encuadre**; solo cambia la cara. Si el encuadre se mueve, el ASCII tiembla.
+
+**Corrección para V1:** como la boca va por volumen (3 niveles), el paquete de V1 son **8 imágenes**: `neutral` (boca cerrada), `mouth_mid`, `mouth_open`, `blink`, `smile`, `serious`, `surprised`, `sad`. Las bocas `o/e/f/m` quedan para cuando haya fonemas. Lo de abajo es el contenido completo previsto a largo plazo.
 
 Contenido sugerido (unas 10 a 12 imágenes; ajustable al medir):
 - 1 neutral
@@ -103,7 +105,7 @@ Las imágenes se pueden mezclar por zonas (boca y ojos) con puntos de la cara pa
 
 ## 7. Archivo del agente
 
-Cada agente es una carpeta portable con: foto base, paquete de caras, atlas ASCII ya calculado, archivo de configuración (nombre, voz elegida, prompt/personalidad, opciones de voz). **La llave de Gemini nunca va en esta carpeta.** El formato debe permitir que alguien comparta su agente copiando la carpeta.
+Cada agente es una carpeta portable con: foto base, paquete de caras, archivo de configuración (corrección: el atlas ASCII no se guarda; se calcula al iniciar el panel según su ancho) (nombre, voz elegida, prompt/personalidad, opciones de voz). **La llave de Gemini nunca va en esta carpeta.** El formato debe permitir que alguien comparta su agente copiando la carpeta.
 
 ## 8. Riesgos
 
