@@ -17,9 +17,6 @@ export const TTS_RATES = {
   audioTokensPerSecond: 25,
 } as const;
 
-/** Costo estimado de una cara: una imagen de 1K (1120 tokens) más la entrada. */
-export const ESTIMATED_FACE_COST_USD = 0.037;
-
 /** Costo real en dólares de una edición de imagen, según los tokens que reporta la API. */
 export function imageCostUsd(inputTokens: number, outputTokens: number): number {
   return (
@@ -27,6 +24,9 @@ export function imageCostUsd(inputTokens: number, outputTokens: number): number 
     1_000_000
   );
 }
+
+/** Costo estimado de una cara: foto de entrada (~1300 tokens) y una imagen de 1K (1120 tokens). */
+export const ESTIMATED_FACE_COST_USD: number = imageCostUsd(1300, 1120);
 
 /** Estimación previa (antes de llamar a la API) de lo que cuesta crear `faceCount` caras. */
 export function estimateCreationCostUsd(faceCount: number): number {

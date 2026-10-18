@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   createGeminiImageClient,
   estimateCreationCostUsd,
+  ESTIMATED_FACE_COST_USD,
   FACE_PROMPTS,
   generateFace,
+  ImageRefusedError,
   imageCostUsd,
   type ImageClient,
 } from '../src/index.js';
@@ -25,25 +27,60 @@ describe('pricing', () => {
 });
 
 describe('generateFace', () => {
-  it('pasa el prompt y la foto al cliente y calcula el costo real', async () => {
-    const png = Buffer.from('png-falso');
-    const photo = Buffer.from('foto');
+  const photo = Buffer.from('foto');
+  const png = Buffer.from('png-falso');
+
+  function clientWith(result: {
+    inputTokens: number | null;
+    outputTokens: number | null;
+  }): { client: ImageClient; calls: Array<{ prompt: string; image: Buffer; mimeType: string }> } {
     const calls: Array<{ prompt: string; image: Buffer; mimeType: string }> = [];
     const client: ImageClient = {
       async editImage(input) {
         calls.push(input);
-        return { png, inputTokens: 1300, outputTokens: 1120 };
+        return { png, ...result };
       },
     };
+    return { client, calls };
+  }
+
+  it('pasa el prompt y la foto al cliente y calcula el costo real', async () => {
+    const { client, calls } = clientWith({ inputTokens: 1300, outputTokens: 1120 });
 
     const result = await generateFace(client, photo, 'image/jpeg', 'smile');
 
     expect(result.png).toBe(png);
     expect(result.costUsd).toBeCloseTo(0.03555, 5);
+    expect(result.costEstimated).toBe(false);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.prompt).toBe(FACE_PROMPTS['smile']);
     expect(calls[0]?.image).toBe(photo);
     expect(calls[0]?.mimeType).toBe('image/jpeg');
+  });
+
+  it.each([
+    ['sin uso', { inputTokens: null, outputTokens: null }],
+    ['solo entrada', { inputTokens: 1300, outputTokens: null }],
+    ['solo salida', { inputTokens: null, outputTokens: 1120 }],
+  ])('si la API no informa el uso (%s), conserva la imagen y estima el costo', async (_n, usage) => {
+    const { client } = clientWith(usage);
+
+    const result = await generateFace(client, photo, 'image/png', 'blink');
+
+    expect(result.png).toBe(png);
+    expect(result.costUsd).toBe(ESTIMATED_FACE_COST_USD);
+    expect(result.costEstimated).toBe(true);
+  });
+
+  it('deja pasar sin envolver el error que lanza el cliente', async () => {
+    const boom = new Error('red caída');
+    const client: ImageClient = {
+      async editImage() {
+        throw boom;
+      },
+    };
+
+    await expect(generateFace(client, photo, 'image/png', 'sad')).rejects.toBe(boom);
   });
 });
 
@@ -99,19 +136,68 @@ describe('createGeminiImageClient', () => {
     expect(out.outputTokens).toBe(1320);
   });
 
-  it('falla si la respuesta no trae imagen', async () => {
+  const edit = { prompt: 'p', image: Buffer.from('f'), mimeType: 'image/png' };
+
+  it('lanza ImageRefusedError si la respuesta no trae imagen', async () => {
     const { ai } = fakeAi({ usage: { total_input_tokens: 1, total_output_tokens: 1 } });
     const client = createGeminiImageClient(cfg, ai);
-    await expect(
-      client.editImage({ prompt: 'p', image: Buffer.from('f'), mimeType: 'image/png' }),
-    ).rejects.toThrow(/sin imagen/);
+    const err = await client.editImage(edit).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ImageRefusedError);
+    expect(err).toBeInstanceOf(Error);
   });
 
-  it('falla si la respuesta no trae el uso de tokens', async () => {
-    const { ai } = fakeAi({ output_image: { data: Buffer.from('x').toString('base64') } });
+  it('lanza ImageRefusedError si la imagen viene con data vacía', async () => {
+    const { ai } = fakeAi({ output_image: { data: '' } });
     const client = createGeminiImageClient(cfg, ai);
-    await expect(
-      client.editImage({ prompt: 'p', image: Buffer.from('f'), mimeType: 'image/png' }),
-    ).rejects.toThrow(/tokens/);
+    await expect(client.editImage(edit)).rejects.toBeInstanceOf(ImageRefusedError);
+  });
+
+  it('ImageRefusedError lleva el texto y el estado que expone la interacción', async () => {
+    const { ai } = fakeAi({ status: 'failed', output_text: 'No puedo editar esta foto.' });
+    const client = createGeminiImageClient(cfg, ai);
+    const err = (await client.editImage(edit).catch((e: unknown) => e)) as ImageRefusedError;
+    expect(err.detail).toContain('No puedo editar esta foto.');
+    expect(err.detail).toContain('failed');
+  });
+
+  it('ImageRefusedError no inventa detalle si la interacción no trae nada', async () => {
+    const { ai } = fakeAi({});
+    const client = createGeminiImageClient(cfg, ai);
+    const err = (await client.editImage(edit).catch((e: unknown) => e)) as ImageRefusedError;
+    expect(err.detail).toBeUndefined();
+  });
+
+  it('devuelve la imagen con tokens null si la API no informa el uso', async () => {
+    const png = Buffer.from('pagada');
+    const { ai } = fakeAi({ output_image: { data: png.toString('base64') } });
+    const client = createGeminiImageClient(cfg, ai);
+    const out = await client.editImage(edit);
+    expect(out.png.equals(png)).toBe(true);
+    expect(out.inputTokens).toBeNull();
+    expect(out.outputTokens).toBeNull();
+  });
+
+  it('pone en null solo el campo de uso que falta', async () => {
+    const { ai } = fakeAi({
+      output_image: { data: Buffer.from('x').toString('base64') },
+      usage: { total_input_tokens: 1300 },
+    });
+    const client = createGeminiImageClient(cfg, ai);
+    const out = await client.editImage(edit);
+    expect(out.inputTokens).toBe(1300);
+    expect(out.outputTokens).toBeNull();
+  });
+
+  it('deja pasar sin envolver el error del SDK', async () => {
+    const boom = new Error('429');
+    const ai = {
+      interactions: {
+        async create(): Promise<unknown> {
+          throw boom;
+        },
+      },
+    };
+    const client = createGeminiImageClient(cfg, ai);
+    await expect(client.editImage(edit)).rejects.toBe(boom);
   });
 });
