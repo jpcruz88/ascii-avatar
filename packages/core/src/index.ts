@@ -32,3 +32,5 @@ export { mouthTimeline, syntheticMouthTimeline } from './audio/mouth.js';
 export type { MouthLevel, MouthStep } from './audio/mouth.js';
 export { spokenSummary } from './text/summary.js';
 export { pickExpression } from './text/expression.js';
+export { Animator } from './anim/animator.js';
+export type { AnimatorOptions, SayOptions } from './anim/animator.js';
