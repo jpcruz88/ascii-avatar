@@ -30,3 +30,5 @@ export type { SpendKind } from './budget/ledger.js';
 export { InvalidWavError, parseWav } from './audio/wav.js';
 export { mouthTimeline, syntheticMouthTimeline } from './audio/mouth.js';
 export type { MouthLevel, MouthStep } from './audio/mouth.js';
+export { spokenSummary } from './text/summary.js';
+export { pickExpression } from './text/expression.js';
