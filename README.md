@@ -69,7 +69,9 @@ Ten presente que el enlace apunta a la carpeta del repositorio: si la mueves o l
 Los comandos disponibles son:
 
 ```
-avatar create <nombre> [--foto <ruta>]   Crea un agente a partir de una foto
+avatar create <nombre> [--foto <ruta>]   Crea un agente a partir de una foto (usa Gemini)
+avatar create <nombre> --caras <carpeta> [--foto <ruta>]
+                                         Importa tus propias ocho caras PNG (sin Gemini, sin llave, sin costo)
 avatar panel [--agente <nombre>] [--cols <n>] [--modo glyphs|halfblock]
                                          Abre el panel (tecla v: voz, q: salir)
 avatar voice on|off                      Activa o desactiva la voz
@@ -96,7 +98,7 @@ El nombre del agente va de 1 a 32 caracteres entre `a-z`, `0-9` y guion. Si omit
 
 Si algo se interrumpe (falla la red, cerraste la terminal), basta con volver a correr el mismo comando: reutiliza la foto guardada y solo genera las caras que faltan. Nunca se vuelve a pagar por una cara ya hecha.
 
-El tope sí es definitivo: el gasto de creación se acumula por agente, así que si ya llegaste a $1.60 USD, volver a correr `avatar create` se detiene de inmediato por el mismo tope. Las caras que falten tendrías que aportarlas tú con el [paquete de caras manual](#aportar-un-paquete-de-caras-manual).
+El tope sí es definitivo: el gasto de creación se acumula por agente, así que si ya llegaste a $1.60 USD, volver a correr `avatar create` se detiene de inmediato por el mismo tope. Las caras que falten las aportas tú con `avatar create <nombre> --caras <carpeta>` (ver [paquete de caras manual](#aportar-un-paquete-de-caras-manual)); ese comando no usa Gemini, así que el tope no le afecta.
 
 Al terminar, si no tenías ningún agente activo, el nuevo queda como agente activo en `~/.ascii-avatar/config.json`.
 
@@ -223,7 +225,7 @@ Los precios de un servicio externo cambian. Si ves que el gasto real se desvía 
 
 ## Aportar un paquete de caras manual
 
-No tienes que usar Gemini para las imágenes: puedes hacer las tuyas con cualquier herramienta (otro generador, fotos reales, ilustraciones). Es el camino a seguir si Gemini rechaza tu foto o prefieres no pagar.
+No tienes que usar Gemini para las imágenes: puedes hacer las tuyas con cualquier herramienta (otro generador, fotos reales, ilustraciones). Es el camino a seguir si Gemini rechaza tu foto, si se alcanzó el tope de creación o si prefieres no pagar.
 
 **Contrato de encuadre.** Las ocho imágenes deben tener la misma cámara, la misma pose, la misma luz, el mismo encuadre y el mismo fondo. Solo cambia la cara. Y todas deben tener exactamente el mismo tamaño en píxeles (por ejemplo 1024 por 1024). Si el encuadre se mueve entre imágenes, el ASCII "tiembla" al cambiar de cara.
 
@@ -240,29 +242,26 @@ No tienes que usar Gemini para las imágenes: puedes hacer las tuyas con cualqui
 | `surprised.png` | sorpresa |
 | `sad.png` | tristeza |
 
-Dónde van: `~/.ascii-avatar/agents/<nombre>/faces/<id>.png`.
-
-Dos formas de preparar la carpeta:
-
-- **Después de un rechazo de Gemini.** `avatar create` ya dejó creada la carpeta del agente; copia tus PNG en `faces/` y vuelve a correr `avatar create <nombre>` (te dirá que ya está completo, o generará solo las que falten, previa confirmación).
-- **Sin usar Gemini.** Crea la carpeta a mano con un `agent.json` y tus ocho PNG:
+Pon los ocho PNG en una carpeta (cada uno con su nombre exacto, `<id>.png`) y corre:
 
 ```sh
-mkdir -p ~/.ascii-avatar/agents/ana/faces
-cat > ~/.ascii-avatar/agents/ana/agent.json <<'EOF'
-{
-  "name": "ana",
-  "voice": "Kore",
-  "personality": "",
-  "createdAt": "2026-10-18T00:00:00.000Z",
-  "promptsVersion": 1
-}
-EOF
-# copia aquí tus ocho PNG: neutral.png, mouth_mid.png, ... en ~/.ascii-avatar/agents/ana/faces/
+avatar create ana --caras ~/Imagenes/ana-caras
 avatar panel --agente ana
 ```
 
-El campo `name` debe coincidir con el nombre de la carpeta. Para dejarlo como agente por defecto, pon `"activeAgent": "ana"` en `~/.ascii-avatar/config.json`.
+Opcionalmente, `--foto <ruta>` guarda una foto base (PNG, JPG o WebP de hasta 10 MB, con cada lado entre 256 y 8000 px); si la omites, la foto base del agente es tu `neutral.png`.
+
+Este comando **no cuesta nada y no necesita llave**: no llama a Gemini, no te pide la llave, no gasta y no escribe nada en el registro de gasto. Es la salida cuando se alcanza el tope de creación o cuando Gemini rechaza tu foto.
+
+Qué comprueba antes de escribir nada (todo o nada: si algo falla, no se crea ni se cambia nada y el mensaje dice qué archivo y por qué):
+
+- Están los ocho archivos `<id>.png`; si faltan, te da la lista exacta de los que faltan.
+- Cada uno es realmente un PNG (se mira la cabecera, no la extensión) y pesa 10 MB o menos.
+- Los ocho miden exactamente lo mismo, y cada lado está entre 64 y 8000 px.
+
+Si el agente no existe, lo crea; si ya existe, solo reemplaza sus ocho caras y deja `agent.json` y la foto como estaban (con `--foto` sobre un agente existente, la foto se ignora). Si no tenías ningún agente activo, el nuevo queda como activo en `~/.ascii-avatar/config.json`.
+
+Las imágenes quedan en `~/.ascii-avatar/agents/<nombre>/faces/<id>.png`. El campo `promptsVersion` de su `agent.json` vale `0`, que marca un paquete que no vino de los prompts de Gemini.
 
 Para comprobar que tus imágenes no tiemblan antes de usarlas, corre el experimento de abajo con `--faces-dir`.
 
@@ -312,7 +311,7 @@ Los ids de modelo se pueden cambiar sin tocar el código por si Google retira o 
 
 **"ya hay un panel abierto".** Solo puede haber uno por carpeta de datos. Ciérralo con `q` en su ventana.
 
-**"Voz no disponible: falta la llave de Gemini".** No hay llave en `GEMINI_API_KEY` ni en `~/.ascii-avatar/secrets.json` (por ejemplo, si el agente se hizo a mano). Corre `avatar create <nombre>` con un agente nuevo para que la guarde, o crea `secrets.json` a mano con `{"geminiApiKey": "..."}` y permisos 0600. Otros avisos de voz no disponible ("falló la síntesis", "no se pudo reproducir el audio") significan que Gemini no respondió o que `afplay` falló; la siguiente respuesta lo vuelve a intentar.
+**"Voz no disponible: falta la llave de Gemini".** No hay llave en `GEMINI_API_KEY` ni en `~/.ascii-avatar/secrets.json` (por ejemplo, si el agente se importó con `--caras`). Corre `avatar create <nombre>` con un agente nuevo para que la guarde, o crea `secrets.json` a mano con `{"geminiApiKey": "..."}` y permisos 0600. Otros avisos de voz no disponible ("falló la síntesis", "no se pudo reproducir el audio") significan que Gemini no respondió o que `afplay` falló; la siguiente respuesta lo vuelve a intentar.
 
 **"Voz bloqueada: no se pudo registrar el gasto".** El panel no pudo escribir en `~/.ascii-avatar/ledger.jsonl` (permisos, disco lleno). Sin ese registro no se puede hacer cumplir el límite, así que la voz se bloquea hasta que reinicies el panel. Arregla el permiso o el espacio y vuelve a abrirlo.
 
@@ -320,7 +319,7 @@ Los ids de modelo se pueden cambiar sin tocar el código por si Google retira o 
 
 **"Gemini rechazó el texto; sin voz esta vez".** El filtro de Gemini no aceptó ese resumen. Pasa de vez en cuando; la siguiente respuesta funciona normal.
 
-**Gemini rechazó la foto (al crear).** Llega un mensaje como "Gemini rechazó editar la foto (probable filtro de contenido)". Prueba con otra foto (frontal, bien iluminada, una sola persona) o usa el paquete manual descrito arriba; el mensaje te da la ruta exacta de `faces/` y los ocho nombres.
+**Gemini rechazó la foto (al crear).** Llega un mensaje como "Gemini rechazó editar la foto (probable filtro de contenido)". Prueba con otra foto (frontal, bien iluminada, una sola persona) o usa el paquete manual descrito arriba con `avatar create <nombre> --caras <carpeta>`; el mensaje te recuerda el comando y los ocho nombres.
 
 **El panel no reacciona a Claude Code.** Revisa, en orden: que corriste `avatar install-hook` (y que lo volviste a correr si moviste el repositorio o cambiaste de versión de Node: el hook guarda la ruta absoluta de `node`, y sus errores no se muestran); que reiniciaste las sesiones de Claude Code después; que el panel está abierto; y que `ASCII_AVATAR_HOME`, si la usas, es la misma en ambos lados. Puedes probar el hook a mano con el panel abierto:
 

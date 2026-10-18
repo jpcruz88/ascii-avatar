@@ -253,7 +253,7 @@ describe('runCreate: errores y reanudación', () => {
     const result = await runCreate(makeDeps({ imageClient: fakeClient({ refuse: true }) }));
     expect(result.status).toBe('failed');
     expect(result.message).toContain('rechaz');
-    expect(result.message).toContain(facesDir());
+    expect(result.message).toContain('avatar create luna --caras <carpeta>');
     for (const id of FACE_IDS) expect(result.message).toContain(id);
     expect(calls).toBe(1);
   });

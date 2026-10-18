@@ -10,7 +10,9 @@ import { defaultRoot } from './paths.js';
 const HELP = `avatar: avatar ASCII animado para la terminal.
 
 Uso:
-  avatar create <nombre> [--foto <ruta>]   Crea un agente a partir de una foto
+  avatar create <nombre> [--foto <ruta>]   Crea un agente a partir de una foto (usa Gemini)
+  avatar create <nombre> --caras <carpeta> [--foto <ruta>]
+                                           Importa tus propias 8 caras PNG (sin Gemini, sin llave, sin costo)
   avatar panel [--agente <nombre>] [--cols <n>] [--modo glyphs|halfblock]
                                            Abre el panel (tecla v: voz, q: salir)
   avatar voice on|off                      Activa o desactiva la voz
@@ -66,9 +68,34 @@ function readStdin(maxBytes: number, waitMs: number): Promise<string> {
   });
 }
 
+/** `avatar create <nombre> --caras <carpeta>`: no toca Gemini ni pide llave. */
+async function importFaces(name: string, facesDir: string, photo: string | true | undefined, root: string): Promise<number> {
+  if (photo === true) return fail('Falta la ruta después de --foto.');
+  try {
+    const { validateAgentName } = await import('@ascii-avatar/core');
+    const { runImportFaces } = await import('./commands/import-faces.js');
+    const { cleanPath } = await import('./prompts.js');
+    validateAgentName(name);
+    const result = await runImportFaces({
+      root,
+      name,
+      facesDir: cleanPath(facesDir),
+      ...(photo === undefined ? {} : { photoPath: cleanPath(photo) }),
+      out: (line) => void process.stdout.write(`${line}\n`),
+    });
+    (result.status === 'failed' ? console.error : console.log)(result.message);
+    return result.status === 'failed' ? 1 : 0;
+  } catch (error) {
+    return fail(error instanceof Error ? error.message.split('\n')[0] ?? 'Error.' : 'Error.');
+  }
+}
+
 async function create(args: ParsedArgs, root: string): Promise<number> {
   const [name] = args.positionals;
-  if (name === undefined) return fail('Uso: avatar create <nombre> [--foto <ruta>]');
+  if (name === undefined) return fail('Uso: avatar create <nombre> [--foto <ruta>] [--caras <carpeta>]');
+  const { caras } = args.flags;
+  if (caras === true) return fail('Falta la carpeta después de --caras.');
+  if (caras !== undefined) return importFaces(name, caras, args.flags.foto, root);
   const { existsSync } = await import('node:fs');
   const { Ledger, loadApiKey, saveApiKey, validateAgentName } = await import('@ascii-avatar/core');
   const { createGeminiImageClient, loadGeminiConfig } = await import('@ascii-avatar/gemini');

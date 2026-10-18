@@ -34,6 +34,15 @@ describe('parseArgs', () => {
     expect(() => parseArgs(['panel', '--cols', '--modo', 'glyphs'])).toThrow(/--cols/);
   });
 
+  it('--caras lleva un valor', () => {
+    expect(parseArgs(['create', 'ana', '--caras', './x'])).toEqual({
+      cmd: 'create',
+      positionals: ['ana'],
+      flags: { caras: './x' },
+    });
+    expect(() => parseArgs(['create', 'ana', '--caras'])).toThrow('--caras');
+  });
+
   it('tras -- todo es posicional', () => {
     expect(parseArgs(['create', '--', '--raro']).positionals).toEqual(['--raro']);
   });
@@ -42,6 +51,7 @@ describe('parseArgs', () => {
 describe('unknownFlags', () => {
   it('acepta solo las banderas de cada subcomando', () => {
     expect(unknownFlags('create', { foto: 'a.png' })).toEqual([]);
+    expect(unknownFlags('create', { caras: './x', foto: 'a.png' })).toEqual([]);
     expect(unknownFlags('panel', { agente: 'ana', cols: '80', modo: 'glyphs' })).toEqual([]);
     expect(unknownFlags('install-hook', { uninstall: true, settings: 's.json' })).toEqual([]);
     expect(unknownFlags('voice', {})).toEqual([]);

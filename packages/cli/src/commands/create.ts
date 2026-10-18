@@ -1,6 +1,5 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import sharp from 'sharp';
 import {
   BudgetExceededError,
   CREATION_CAP_USD,
@@ -27,6 +26,7 @@ import {
   type ImageClient,
 } from '@ascii-avatar/gemini';
 import { loadConfig, saveConfig } from '../config.js';
+import { ImageInputError, readPhoto, type Photo } from '../image-input.js';
 
 export interface CreateDeps {
   root: string;
@@ -48,68 +48,10 @@ export interface CreateResult {
   message: string;
 }
 
-const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
-const MIN_SIDE = 256;
-const MAX_SIDE = 8000;
 const PREVIEW_FACE: FaceId = 'mouth_open';
 
-type Mime = 'image/png' | 'image/jpeg' | 'image/webp';
-interface Photo {
-  buf: Buffer;
-  mimeType: Mime;
-}
-
-/** Error esperado: su mensaje ya está en español y es seguro mostrarlo tal cual. */
-class CreateFailure extends Error {}
-
-function mimeFromBytes(buf: Buffer): Mime | undefined {
-  if (buf.length >= 4 && buf.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]))) return 'image/png';
-  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
-  if (buf.length >= 12 && buf.toString('latin1', 0, 4) === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP') {
-    return 'image/webp';
-  }
-  return undefined;
-}
-
-/** Lee y valida la foto antes de cualquier llamada o gasto. */
-async function readPhoto(path: string): Promise<Photo> {
-  let size: number;
-  try {
-    const stat = statSync(path);
-    if (!stat.isFile()) throw new CreateFailure(`La ruta de la foto no es un archivo: ${path}`);
-    size = stat.size;
-  } catch (error) {
-    if (error instanceof CreateFailure) throw error;
-    throw new CreateFailure(`No se encontró la foto o no se puede leer: ${path}`);
-  }
-  if (size > MAX_PHOTO_BYTES) throw new CreateFailure('La foto pesa más de 10 MB. Usa una más liviana.');
-  let buf: Buffer;
-  try {
-    buf = readFileSync(path);
-  } catch {
-    throw new CreateFailure(`No se pudo leer la foto: ${path}`);
-  }
-  const mimeType = mimeFromBytes(buf);
-  if (!mimeType) throw new CreateFailure('La foto debe ser una imagen PNG, JPG o WebP.');
-  let width: number | undefined;
-  let height: number | undefined;
-  try {
-    const meta = await sharp(buf).metadata();
-    // Con orientación EXIF 5 a 8 la imagen se muestra girada 90 grados: se intercambian los lados.
-    const rotated = (meta.orientation ?? 1) >= 5;
-    width = rotated ? meta.height : meta.width;
-    height = rotated ? meta.width : meta.height;
-  } catch {
-    throw new CreateFailure('No se pudo leer la foto: el archivo está dañado.');
-  }
-  if (width === undefined || height === undefined) throw new CreateFailure('No se pudo leer el tamaño de la foto.');
-  if (Math.min(width, height) < MIN_SIDE || Math.max(width, height) > MAX_SIDE) {
-    throw new CreateFailure(
-      `La foto mide ${width}×${height} px; cada lado debe medir entre ${MIN_SIDE} y ${MAX_SIDE} px.`,
-    );
-  }
-  return { buf, mimeType };
-}
+/** Error esperado de esta orden: su mensaje ya está en español y es seguro mostrarlo tal cual. */
+class CreateFailure extends ImageInputError {}
 
 function storedPhotoPath(root: string, name: string): string {
   const dir = join(root, 'agents', name);
@@ -137,8 +79,8 @@ export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
   const cap = deps.cap ?? CREATION_CAP_USD;
   const agentDir = join(root, 'agents', name);
   const manualHint = (): string =>
-    `Gemini rechazó editar la foto (probable filtro de contenido). Puedes poner tus propias 8 imágenes PNG en ` +
-    `${join(agentDir, 'faces')}/<id>.png con estos nombres: ${FACE_IDS.join(', ')}. Luego vuelve a correr el comando.`;
+    `Gemini rechazó editar la foto (probable filtro de contenido). Puedes aportar tus propias 8 imágenes PNG, ` +
+    `con estos nombres: ${FACE_IDS.join(', ')}. Ponlas en una carpeta y corre: avatar create ${name} --caras <carpeta>`;
 
   try {
     validateAgentName(name);
@@ -221,7 +163,7 @@ export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
       };
     }
     if (error instanceof ImageRefusedError) return { status: 'failed', message: manualHint() };
-    if (error instanceof CreateFailure) return { status: 'failed', message: error.message };
+    if (error instanceof ImageInputError) return { status: 'failed', message: error.message };
     return {
       status: 'failed',
       message: `No se pudo completar la creación: ${safeMessage(error)}. Lo ya generado quedó guardado; al volver a correr solo se generan las caras que faltan.`,
