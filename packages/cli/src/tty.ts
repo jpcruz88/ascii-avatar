@@ -36,10 +36,10 @@ export function fitFrame(
 export function footerText(s: {
   agent: string;
   voice: boolean;
-  spent: number;
+  spent: number | null;
   notice: string | null;
 }): string {
-  const base = `${s.agent} · voz: ${s.voice ? 'on' : 'off'} · gasto hoy: $${s.spent.toFixed(3)}`;
+  const base = `${s.agent} · voz: ${s.voice ? 'on' : 'off'} · gasto hoy: ${s.spent === null ? '?' : `$${s.spent.toFixed(3)}`}`;
   return s.notice === null ? base : `${base} · ${s.notice}`;
 }
 
@@ -92,13 +92,21 @@ export function runTty(o: TtyOptions): Promise<void> {
   return new Promise<void>((resolve) => {
     let clear = true;
     let restored = false;
-    let spent = o.spentToday();
+    // Si el registro de gasto no se puede leer, el pie muestra "?" en vez de tumbar el panel.
+    const readSpent = (): number | null => {
+      try {
+        return o.spentToday();
+      } catch {
+        return null;
+      }
+    };
+    let spent = readSpent();
     let spentAt = performance.now();
 
     const draw = (): void => {
       const now = performance.now();
       if (now - spentAt >= SPENT_REFRESH_MS) {
-        spent = o.spentToday();
+        spent = readSpent();
         spentAt = now;
       }
       const footer = footerText({ agent: o.agent, voice: o.voiceOn(), spent, notice: o.notice() });

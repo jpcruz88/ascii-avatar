@@ -133,3 +133,11 @@ describe('composeScreen', () => {
     expect(out).toContain('\x1b[3;1Hpequeña');
   });
 });
+
+describe('footerText sin lectura del gasto', () => {
+  it('muestra "?" si no se pudo leer el gasto', () => {
+    expect(footerText({ agent: 'luna', voice: true, spent: null, notice: null })).toBe(
+      'luna · voz: on · gasto hoy: ?',
+    );
+  });
+});

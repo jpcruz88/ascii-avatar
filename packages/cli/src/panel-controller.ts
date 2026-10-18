@@ -27,7 +27,8 @@ export const NOTICE_LIMIT = 'Límite diario de voz alcanzado';
 const NOTICE_REFUSED = 'Gemini rechazó el texto; sin voz esta vez';
 const NOTICE_TTS_FAILED = 'Voz no disponible: falló la síntesis';
 const NOTICE_PLAYER_FAILED = 'Voz no disponible: no se pudo reproducir el audio';
-const NOTICE_LEDGER_FAILED = 'No se pudo registrar el gasto de voz';
+export const NOTICE_BLOCKED = 'Voz bloqueada: no se pudo registrar el gasto';
+const NOTICE_SPENT_UNREADABLE = 'No se pudo leer el gasto de hoy';
 
 export interface PanelControllerDeps {
   root: string;
@@ -49,16 +50,22 @@ export class PanelController {
   private queue: Promise<void> = Promise.resolve();
   private playback: Playback | null = null;
   private current: { text: string; untilMs: number } | null = null;
+  /** Se cerró el panel: no se reproduce ni se anima nada más. */
+  private closed = false;
+  /** Un gasto no quedó registrado: la voz se bloquea hasta reiniciar el panel (el tope ya no se puede hacer cumplir). */
+  private voiceBlocked = false;
 
   constructor(private readonly d: PanelControllerDeps) {}
 
   handle(m: Msg): Promise<void> {
+    if (this.closed) return Promise.resolve();
     const run = this.queue.then(() => this.process(m));
     this.queue = run.catch(() => undefined);
     return run;
   }
 
   notice(): string | null {
+    if (this.voiceBlocked) return NOTICE_BLOCKED;
     if (this.current === null) return null;
     if (this.d.now() >= this.current.untilMs) this.current = null;
     return this.current?.text ?? null;
@@ -83,13 +90,20 @@ export class PanelController {
     }
   }
 
-  /** Detiene el audio en curso (al cerrar el panel). */
+  /** Cierra el panel: detiene el audio y deja de procesar mensajes. Una síntesis en vuelo se registra pero no suena. */
+  close(): void {
+    this.closed = true;
+    this.stopAudio();
+  }
+
+  /** Detiene el audio en curso. */
   stopAudio(): void {
     this.playback?.stop();
     this.playback = null;
   }
 
   private async process(m: Msg): Promise<void> {
+    if (this.closed) return;
     switch (m.type) {
       case 'thinking':
         this.d.animator.thinking(this.d.now());
@@ -114,10 +128,15 @@ export class PanelController {
 
     if (summary === '') return this.gesture('', expression);
     if (!this.d.config.voice) return this.gesture(summary, expression);
+    if (this.voiceBlocked) return this.gesture(summary, expression);
     if (this.d.tts === null) return this.gesture(summary, expression, NOTICE_NO_KEY);
-    if (this.d.ledger.spentToday() >= this.d.config.dailyLimitUsd) {
-      return this.gesture(summary, expression, NOTICE_LIMIT);
+    let spent: number;
+    try {
+      spent = this.d.ledger.spentToday();
+    } catch {
+      return this.gesture(summary, expression, NOTICE_SPENT_UNREADABLE);
     }
+    if (spent >= this.d.config.dailyLimitUsd) return this.gesture(summary, expression, NOTICE_LIMIT);
 
     let result;
     try {
@@ -128,11 +147,17 @@ export class PanelController {
       return this.gesture(summary, expression, notice);
     }
 
-    try {
-      this.d.ledger.record('voice', this.d.agent, result.costUsd);
-    } catch {
-      this.setNotice(NOTICE_LEDGER_FAILED);
+    // Un costo inválido o un registro que falla dejarían gasto sin contar: se bloquea la voz.
+    if (!Number.isFinite(result.costUsd) || result.costUsd < 0) {
+      this.voiceBlocked = true;
+    } else {
+      try {
+        this.d.ledger.record('voice', this.d.agent, result.costUsd);
+      } catch {
+        this.voiceBlocked = true;
+      }
     }
+    if (this.closed) return;
 
     let steps: MouthStep[];
     let durationMs: number;

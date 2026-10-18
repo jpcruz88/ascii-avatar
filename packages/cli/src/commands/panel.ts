@@ -95,10 +95,13 @@ export async function runPanel(opts: PanelOptions): Promise<number> {
     now,
   });
 
+  // Si el proceso cae, que no quede un `afplay` huérfano ni el WAV temporal.
+  process.on('exit', () => controller.stopAudio());
   let server;
   try {
     server = await startServer(socketPath(root), (m) => void controller.handle(m));
   } catch (error) {
+    controller.close();
     console.error(error instanceof Error ? `No se pudo abrir el panel: ${error.message}` : String(error));
     return 1;
   }
@@ -112,7 +115,7 @@ export async function runPanel(opts: PanelOptions): Promise<number> {
       onToggleVoice: () => controller.setVoice(!controller.voiceOn()),
     });
   } finally {
-    controller.stopAudio();
+    controller.close();
     await server.close();
   }
   return 0;
