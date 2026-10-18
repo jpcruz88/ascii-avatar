@@ -122,12 +122,28 @@ describe('installHook', () => {
     expect(JSON.parse(readFileSync(real, 'utf8')).hooks.UserPromptSubmit).toHaveLength(1);
   });
 
+  it('conserva exactamente el modo original (0664) pese al umask', () => {
+    write(ORIGINAL);
+    chmodSync(file, 0o664);
+    const old = process.umask(0o077);
+    try {
+      installHook(file, 'avatar');
+    } finally {
+      process.umask(old);
+    }
+    expect(statSync(file).mode & 0o777).toBe(0o664);
+  });
+
   it('sin `bin`, el comando usa rutas absolutas entre comillas y el marcador', () => {
     installHook(file);
     const command: string = read().hooks.Stop[0].hooks[0].command;
     expect(command).toBe(defaultHookCommand());
     expect(command).toContain(`"${process.execPath}"`);
-    expect(command).toMatch(/"\/[^"]*\/dist\/bin\.js" hook --from-ascii-avatar$/);
+    const distBin = fileURLToPath(new URL('../dist/bin.js', import.meta.url));
+    expect(command).toBe(`"${process.execPath}" "${distBin}" hook --from-ascii-avatar 2>/dev/null || true`);
+    expect(command).toContain(HOOK_MARKER);
+    // Detectado como propio: una segunda instalación no duplica.
+    expect(installHook(file).changed).toBe(false);
   });
 });
 
@@ -187,6 +203,17 @@ describe('avatar install-hook (proceso real)', () => {
     expect(b.status).toBe(0);
     expect(read()).toEqual(ORIGINAL);
   }, 120_000);
+
+  it('una bandera desconocida (--unistall) no instala nada: ayuda y exit 1', () => {
+    write(ORIGINAL);
+    const before = readFileSync(file, 'utf8');
+    const r = spawnSync(process.execPath, [distBin, 'install-hook', '--settings', file, '--unistall'], { encoding: 'utf8' });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/--unistall/);
+    expect(r.stderr).toMatch(/Uso:/);
+    expect(readFileSync(file, 'utf8')).toBe(before);
+    expect(baks()).toHaveLength(0);
+  });
 
   it('JSON inválido: sale con 1 y avisa en stderr', () => {
     writeFileSync(file, 'no json');

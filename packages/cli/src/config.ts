@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_DAILY_LIMIT_USD, type AsciiMode } from '@ascii-avatar/core';
 
@@ -21,14 +20,9 @@ export const DEFAULT_CONFIG: Readonly<CliConfig> = {
   cols: 70,
 };
 
-/** Carpeta de datos: `ASCII_AVATAR_HOME` o `~/.ascii-avatar`. */
-export function defaultRoot(env: NodeJS.ProcessEnv = process.env): string {
-  const home = env.ASCII_AVATAR_HOME;
-  return home !== undefined && home !== '' ? home : join(homedir(), '.ascii-avatar');
-}
+export { defaultRoot, socketPath } from './paths.js';
 
 export const configPath = (root: string): string => join(root, 'config.json');
-export const socketPath = (root: string): string => join(root, 'avatar.sock');
 export const ledgerPath = (root: string): string => join(root, 'ledger.jsonl');
 
 /** Crea la carpeta de datos solo para el usuario (0700), también si ya existía. */

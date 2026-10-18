@@ -1,11 +1,11 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { extractHookMessage, runHook } from '../src/commands/hook.js';
-import { startServer, type Msg } from '../src/ipc.js';
+import { MAX_LINE_BYTES, startServer, type Msg } from '../src/ipc.js';
 import { socketPath } from '../src/config.js';
 
 let root: string;
@@ -71,6 +71,36 @@ describe('extractHookMessage', () => {
   });
 });
 
+describe('extractHookMessage: tope en bytes', () => {
+  const fits = (text: string): boolean => {
+    const msg = extractHookMessage(JSON.stringify({ hook_event_name: 'Stop', last_assistant_message: text }));
+    expect(msg?.type).toBe('say');
+    expect(Buffer.byteLength(JSON.stringify(msg)) + 1).toBeLessThanOrEqual(MAX_LINE_BYTES);
+    const out = (msg as { text: string }).text;
+    expect(out.length).toBeGreaterThan(0);
+    expect(text.startsWith(out)).toBe(true);
+    expect(out).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/);
+    return true;
+  };
+
+  it('caracteres de control (6 bytes escapados cada uno)', () => {
+    expect(fits('\u0001'.repeat(200_000))).toBe(true);
+  });
+
+  it('emoji (pares sustitutos) sin partir ninguno', () => {
+    expect(fits('😀'.repeat(100_000))).toBe(true);
+    expect(fits('a' + '😀'.repeat(100_000))).toBe(true);
+  });
+
+  it('comillas y saltos de línea', () => {
+    expect(fits('"\n\\'.repeat(100_000))).toBe(true);
+  });
+
+  it('un texto corto no se toca', () => {
+    expect(extractHookMessage(STOP)).toEqual({ type: 'say', text: 'Listo' });
+  });
+});
+
 describe('runHook', () => {
   it('sin socket resuelve 0 en menos de 500 ms', async () => {
     const t0 = performance.now();
@@ -108,6 +138,49 @@ beforeAll(() => {
   const build = spawnSync('npx', ['tsc', '-b'], { cwd: repoRoot, encoding: 'utf8' });
   if (build.status !== 0) throw new Error(`No compiló: ${build.stdout}${build.stderr}`);
 }, 120_000);
+
+/** Especificadores `import ... from 'x'` / `export ... from 'x'` / `import 'x'` (y `import('x')` si se pide). */
+function specifiers(file: string, withDynamic: boolean): string[] {
+  const src = readFileSync(file, 'utf8');
+  const re = withDynamic
+    ? /(?:^|[\s;])(?:import|export)\s[^'"`;]*?from\s*['"]([^'"]+)['"]|(?:^|[\s;])import\s*['"]([^'"]+)['"]|\bimport\(\s*['"]([^'"]+)['"]\s*\)/g
+    : /(?:^|[\s;])(?:import|export)\s[^'"`;]*?from\s*['"]([^'"]+)['"]|(?:^|[\s;])import\s*['"]([^'"]+)['"]/g;
+  return [...src.matchAll(re)].map((m) => (m[1] ?? m[2] ?? m[3])!);
+}
+
+/** Recorre el grafo de imports relativos desde `entry` y devuelve archivos visitados y especificadores no relativos. */
+function walk(entry: string, withDynamic: boolean): { files: string[]; bare: string[] } {
+  const seen = new Set<string>();
+  const bare = new Set<string>();
+  const stack = [entry];
+  while (stack.length > 0) {
+    const file = stack.pop()!;
+    if (seen.has(file)) continue;
+    seen.add(file);
+    expect(existsSync(file), `falta ${file}`).toBe(true);
+    for (const spec of specifiers(file, withDynamic)) {
+      if (spec.startsWith('.')) stack.push(resolve(dirname(file), spec));
+      else bare.add(spec);
+    }
+  }
+  return { files: [...seen], bare: [...bare] };
+}
+
+describe('el camino del hook no carga dependencias nativas', () => {
+  const FORBIDDEN = /^(@ascii-avatar\/|sharp)/;
+
+  it('bin.js solo importa estáticamente builtins de Node, paths.js y args.js', () => {
+    const { files, bare } = walk(distBin, false);
+    expect(bare.filter((b) => !b.startsWith('node:'))).toEqual([]);
+    expect(files.map((f) => f.slice(dirname(distBin).length + 1)).sort()).toEqual(['args.js', 'bin.js', 'paths.js']);
+  });
+
+  it('commands/hook.js (estático y dinámico) no llega a core, gemini ni sharp', () => {
+    const { bare } = walk(join(dirname(distBin), 'commands', 'hook.js'), true);
+    expect(bare.filter((b) => FORBIDDEN.test(b))).toEqual([]);
+    expect(bare.filter((b) => !b.startsWith('node:'))).toEqual([]);
+  });
+});
 
 function runBin(stdin: string, env: Record<string, string> = {}) {
   return spawnSync(process.execPath, [distBin, 'hook', '--from-ascii-avatar'], {

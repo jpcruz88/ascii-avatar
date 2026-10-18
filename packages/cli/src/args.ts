@@ -37,3 +37,18 @@ export function parseArgs(argv: readonly string[], valueFlags: ReadonlySet<strin
   const [cmd, ...rest] = positionals;
   return { cmd, positionals: rest, flags };
 }
+
+/** Banderas válidas de cada subcomando. */
+const ALLOWED_FLAGS: Readonly<Record<string, readonly string[]>> = {
+  create: ['foto'],
+  panel: ['agente', 'cols', 'modo'],
+  voice: [],
+  'install-hook': ['uninstall', 'settings'],
+  help: [],
+};
+
+/** Banderas de `flags` que el subcomando `cmd` no conoce. */
+export function unknownFlags(cmd: string, flags: Readonly<Record<string, unknown>>): string[] {
+  const allowed = ALLOWED_FLAGS[cmd] ?? [];
+  return Object.keys(flags).filter((f) => !allowed.includes(f));
+}

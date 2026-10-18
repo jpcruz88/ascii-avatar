@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// Punto de entrada del comando `avatar`. Cada subcomando carga sus módulos al usarse:
-// `avatar hook` corre en cada turno de Claude Code y debe arrancar rápido.
+// Punto de entrada del comando `avatar`. Aquí solo se importan, de forma estática, builtins de Node,
+// `args.js` y `paths.js`; cada subcomando carga el resto con `import()` dinámico. `avatar hook` corre en
+// cada turno de Claude Code y no puede tocar `sharp` ni `@ascii-avatar/*` (una falla nativa lo rompería).
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { parseArgs, type ParsedArgs } from './args.js';
-import { defaultRoot } from './config.js';
+import { parseArgs, unknownFlags, type ParsedArgs } from './args.js';
+import { defaultRoot } from './paths.js';
 
 const HELP = `avatar: avatar ASCII animado para la terminal.
 
@@ -160,6 +161,12 @@ async function main(argv: string[]): Promise<number> {
     args = parseArgs(argv);
   } catch (error) {
     return fail(`${error instanceof Error ? error.message : 'Argumentos no válidos.'}\n\n${HELP}`);
+  }
+  if (args.cmd !== undefined) {
+    const unknown = unknownFlags(args.cmd, args.flags);
+    if (unknown.length > 0 && ['create', 'panel', 'voice', 'install-hook', 'help'].includes(args.cmd)) {
+      return fail(`Opción desconocida: ${unknown.map((f) => `--${f}`).join(', ')}\n\n${HELP}`);
+    }
   }
   switch (args.cmd) {
     case undefined:

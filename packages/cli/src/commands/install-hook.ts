@@ -3,6 +3,7 @@ import {
   constants,
   copyFileSync,
   existsSync,
+  fchmodSync,
   fsyncSync,
   lstatSync,
   mkdirSync,
@@ -43,7 +44,8 @@ export function defaultHookCommand(): string {
   let bin = fileURLToPath(new URL('../bin.js', import.meta.url));
   // Al correr desde las fuentes (pruebas), apunta al binario compilado.
   bin = bin.replace(/([\\/])src([\\/])bin\.js$/, '$1dist$2bin.js');
-  return `${quote(process.execPath)} ${quote(bin)} hook ${HOOK_MARKER}`;
+  // `2>/dev/null || true`: si el repo se movió o falta Node, el hook no hace ruido ni sale con error.
+  return `${quote(process.execPath)} ${quote(bin)} hook ${HOOK_MARKER} 2>/dev/null || true`;
 }
 
 function isOurs(hook: unknown): boolean {
@@ -121,6 +123,7 @@ function writeAtomic(target: string, content: string, mode: number): void {
   try {
     const fd = openSync(tmp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, mode);
     try {
+      fchmodSync(fd, mode); // el umask puede haber reducido el modo al crear el temporal
       writeSync(fd, content);
       fsyncSync(fd);
     } finally {
