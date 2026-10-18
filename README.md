@@ -92,13 +92,13 @@ El nombre del agente va de 1 a 32 caracteres entre `a-z`, `0-9` y guion. Si omit
 
 1. **Llave de Gemini.** Si no hay una guardada ni definida en `GEMINI_API_KEY`, te la pide sin mostrarla al escribir y la guarda en `~/.ascii-avatar/secrets.json` con permisos 0600 (la carpeta queda en 0700). La llave nunca se guarda dentro de la carpeta del agente ni en el repositorio.
 2. **Estimado y confirmación.** Antes de gastar nada muestra el costo estimado de las caras que faltan (unos $0.036 USD por cara, incluida la foto de entrada, y alrededor de $0.28 USD para las ocho), el tope y lo que ya se gastó en ese agente. Solo continúa si respondes `s`, `si` o `sí`.
-3. **Vista previa barata.** Genera primero una sola cara, `mouth_open`, y la dibuja en la terminal. Si no se parece a ti o la definición no te convence, responde que no: solo gastaste una imagen (unos $0.036 USD) y puedes volver a intentarlo con otra foto.
+3. **Vista previa barata.** Genera primero una sola cara, `mouth_open`, y la dibuja en la terminal. Si no se parece a ti o la definición no te convence, responde que no: solo gastaste una imagen (unos $0.036 USD). El agente ya quedó creado con esa foto y no se puede cambiar: para reintentar con otra foto, usa un nombre nuevo (`avatar create ana2 --foto otra.jpg`) o borra la carpeta `~/.ascii-avatar/agents/<nombre>` y empieza de cero. Si corres `avatar create` con el mismo nombre y una foto distinta, el comando se detiene sin preguntar ni gastar y te indica la carpeta.
 4. **El resto.** Si apruebas, genera las otras siete caras. Cada una se guarda en disco y se registra su costo apenas termina.
 5. **Tope.** Si el gasto de creación de ese agente llegara a $1.60 USD, se detiene y avisa. Lo ya generado queda guardado.
 
-Si algo se interrumpe (falla la red, cerraste la terminal), basta con volver a correr el mismo comando: reutiliza la foto guardada y solo genera las caras que faltan. Nunca se vuelve a pagar por una cara ya hecha.
+Si algo se interrumpe (falla la red, cerraste la terminal), basta con volver a correr el mismo comando (con la misma foto o sin `--foto`): reutiliza la foto guardada y solo genera las caras que faltan. Nunca se vuelve a pagar por una cara ya hecha.
 
-El tope sí es definitivo: el gasto de creación se acumula por agente, así que si ya llegaste a $1.60 USD, volver a correr `avatar create` se detiene de inmediato por el mismo tope. Las caras que falten las aportas tú con `avatar create <nombre> --caras <carpeta>` (ver [paquete de caras manual](#aportar-un-paquete-de-caras-manual)); ese comando no usa Gemini, así que el tope no le afecta.
+El tope sí es definitivo: el gasto de creación se acumula por agente, así que si ya llegaste a $1.60 USD, volver a correr `avatar create` te pide confirmar y se detiene en la primera cara por el mismo tope. Las caras que falten las aportas tú con `avatar create <nombre> --caras <carpeta>` (ver [paquete de caras manual](#aportar-un-paquete-de-caras-manual)); ese comando no usa Gemini, así que el tope no le afecta.
 
 Al terminar, si no tenías ningún agente activo, el nuevo queda como agente activo en `~/.ascii-avatar/config.json`.
 
@@ -207,7 +207,7 @@ Cómo se aplican:
 - **Creación.** Se muestra el estimado y se pide confirmación antes de gastar. Antes de cada imagen se comprueba que el gasto acumulado de ese agente más el de la imagen no pase de $1.60 USD; si pasara, se detiene. Cada imagen se registra en `~/.ascii-avatar/ledger.jsonl` en cuanto se cobra. Los costos se calculan con los tokens que reporta la API; si no los reporta, se marcan como "(estimado)".
 - **Voz.** Cada síntesis se registra en el mismo archivo. Al llegar al límite diario, el avatar deja de hablar por el resto del día (sigue gesticulando) y muestra "Límite diario de voz alcanzado". El día cuenta en hora local.
 - **Contador "gasto hoy".** El pie del panel muestra siempre lo gastado hoy en voz, en dólares con tres decimales.
-- **Cambiar el límite diario.** Cierra el panel (`q`), edita `~/.ascii-avatar/config.json` y vuelve a abrir el panel. El panel lee el archivo una sola vez al arrancar y, cuando pulsas `v`, lo reescribe con lo que tiene en memoria, así que un cambio hecho con el panel abierto no se aplica y puede perderse:
+- **Cambiar el límite diario.** Cierra el panel (`q`), edita `~/.ascii-avatar/config.json` y vuelve a abrir el panel. El panel lee el archivo una sola vez al arrancar, así que un cambio hecho con el panel abierto no se aplica hasta que lo reabras (al pulsar `v` solo se actualiza la voz y se conserva el resto de lo que haya en el archivo):
 
 ```json
 {
@@ -275,8 +275,10 @@ npx tsx packages/cli/spike/spike.ts --faces-dir ~/.ascii-avatar/agents/ana/faces
 
 # Con tu foto y tu llave: genera las ocho caras con Gemini (cuesta dinero)
 export GEMINI_API_KEY=...
-npx tsx packages/cli/spike/spike.ts --photo ~/Fotos/ana.jpg --out ./spike-out --cap 0.50
+npx tsx packages/cli/spike/spike.ts --photo ~/Fotos/ana.jpg --out ~/ascii-avatar-spike --cap 0.50
 ```
+
+Conviene poner `--out` fuera del repositorio (por ejemplo `~/ascii-avatar-spike`) para no mezclar las caras generadas con el código.
 
 Opciones: `--photo <ruta>` y `--out <carpeta>` (para generar), `--faces-dir <carpeta>` (para usar caras existentes, sin API), `--cap <usd>` (tope, por defecto 0.50), `--cols <n>` (por defecto 70) y `--no-play` (solo imprime la tabla, sin reproducir). El experimento lee la llave de `GEMINI_API_KEY`, no de `secrets.json`.
 
@@ -287,6 +289,8 @@ Qué mirar:
 - Al generar, muestra `mouth_open` y pregunta si se parece a la persona antes de gastar en el resto.
 
 Con esto puedes decidir entre `--modo glyphs` y `--modo halfblock`.
+
+Si las caras generadas te convencen, no pagues dos veces: `avatar create <nombre> --caras ~/ascii-avatar-spike --foto <foto>` las reutiliza como paquete manual (sin Gemini y sin costo). Ojo: el gasto del experimento no se anota en `ledger.jsonl`; el tope `--cap` es lo único que lo limita.
 
 ## Modelos y variables de entorno
 
@@ -319,7 +323,9 @@ Los ids de modelo se pueden cambiar sin tocar el código por si Google retira o 
 
 **"Gemini rechazó el texto; sin voz esta vez".** El filtro de Gemini no aceptó ese resumen. Pasa de vez en cuando; la siguiente respuesta funciona normal.
 
-**Gemini rechazó la foto (al crear).** Llega un mensaje como "Gemini rechazó editar la foto (probable filtro de contenido)". Prueba con otra foto (frontal, bien iluminada, una sola persona) o usa el paquete manual descrito arriba con `avatar create <nombre> --caras <carpeta>`; el mensaje te recuerda el comando y los ocho nombres.
+**"La llave de Gemini es incorrecta" (error de autenticación al crear).** Si escribiste mal la llave, quedó guardada así. Borra `~/.ascii-avatar/secrets.json` (o edítalo, o define `GEMINI_API_KEY`, que tiene prioridad) y vuelve a correr `avatar create`; te pedirá la llave otra vez. Lo ya generado se conserva.
+
+**Gemini rechazó la foto (al crear).** Llega un mensaje como "Gemini rechazó editar la foto (probable filtro de contenido)". Prueba con otra foto (frontal, bien iluminada, una sola persona) y un nombre de agente nuevo (el agente ya quedó creado con la foto rechazada), o usa el paquete manual descrito arriba con `avatar create <nombre> --caras <carpeta>`; el mensaje te recuerda el comando y los ocho nombres.
 
 **El panel no reacciona a Claude Code.** Revisa, en orden: que corriste `avatar install-hook` (y que lo volviste a correr si moviste el repositorio o cambiaste de versión de Node: el hook guarda la ruta absoluta de `node`, y sus errores no se muestran); que reiniciaste las sesiones de Claude Code después; que el panel está abierto; y que `ASCII_AVATAR_HOME`, si la usas, es la misma en ambos lados. Puedes probar el hook a mano con el panel abierto:
 
@@ -365,8 +371,10 @@ npm test          # vitest run (usa Node ^22.12, ^24 o >=26)
 Las pruebas no gastan dinero ni tocan tu carpeta real de datos ni tu `~/.claude`. Las pruebas en vivo contra la API real de Gemini están saltadas por defecto: se activan con `RUN_LIVE=1` y una `GEMINI_API_KEY` válida, y **cuestan dinero** (imágenes y voz reales). Úsalas solo cuando quieras confirmar que los ids de modelo y las tarifas siguen vigentes:
 
 ```sh
-RUN_LIVE=1 GEMINI_API_KEY=... npm test
+RUN_LIVE=1 GEMINI_API_KEY=... LIVE_PHOTO=~/Fotos/ana.jpg npm test
 ```
+
+`LIVE_PHOTO` es la ruta de un retrato (JPG o PNG) que las pruebas en vivo envían a Gemini; sin ella fallan.
 
 Cambios de comportamiento: se escribe primero la prueba y se ve fallar. El diseño y las decisiones están en `docs/superpowers/specs/2026-10-18-ascii-avatar-design.md`.
 
