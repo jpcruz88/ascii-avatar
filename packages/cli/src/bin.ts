@@ -205,10 +205,14 @@ async function main(argv: string[]): Promise<number> {
     case 'panel':
       return panel(args, root);
     case 'voice': {
-      const { runVoice } = await import('./commands/voice.js');
-      const r = await runVoice(args.positionals[0] ?? '', root);
-      (r.ok ? console.log : console.error)(r.message);
-      return r.ok ? 0 : 1;
+      try {
+        const { runVoice } = await import('./commands/voice.js');
+        const r = await runVoice(args.positionals[0] ?? '', root);
+        (r.ok ? console.log : console.error)(r.message);
+        return r.ok ? 0 : 1;
+      } catch (error) {
+        return fail(`No se pudo cambiar la voz: ${error instanceof Error ? (error.message.split('\n')[0] ?? 'Error.') : 'Error.'}`);
+      }
     }
     case 'install-hook':
       return installHookCmd(args);

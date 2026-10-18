@@ -1,6 +1,6 @@
 import type { FaceId } from '@ascii-avatar/core';
 
-/** Sube este número al cambiar cualquier prompt, para invalidar las caras ya generadas. */
+/** Versión de los prompts: sube este número al cambiarlos. Se anota en `agent.json` solo como referencia (no invalida las caras ya generadas). */
 export const PROMPTS_VERSION = 1;
 
 const HEAD = 'Edit this portrait.';

@@ -15,7 +15,7 @@ import {
   synthesizeSpeech,
   type TtsClient,
 } from '@ascii-avatar/gemini';
-import { saveConfig, type CliConfig } from './config.js';
+import { loadConfig, saveConfig, type CliConfig } from './config.js';
 import type { Msg } from './ipc.js';
 import type { AudioPlayer, Playback } from './player.js';
 
@@ -79,12 +79,12 @@ export class PanelController {
     return this.d.config.voice;
   }
 
-  /** Enciende o apaga la voz y lo recuerda en el archivo de configuración. */
+  /** Enciende o apaga la voz y lo recuerda en el archivo, sin pisar otros cambios hechos en disco. */
   setVoice(on: boolean): void {
     this.d.config.voice = on;
     this.current = null;
     try {
-      saveConfig(this.d.root, this.d.config);
+      saveConfig(this.d.root, { ...loadConfig(this.d.root), voice: on });
     } catch {
       this.setNotice('No se pudo guardar la configuración');
     }

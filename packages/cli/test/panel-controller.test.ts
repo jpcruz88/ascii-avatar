@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Animator, DEFAULT_DAILY_LIMIT_USD, Ledger } from '@ascii-avatar/core';
 import { SpeechRefusedError, ttsCostUsd, type TtsClient } from '@ascii-avatar/gemini';
-import { loadConfig, type CliConfig } from '../src/config.js';
+import { loadConfig, saveConfig, type CliConfig } from '../src/config.js';
 import { PanelController } from '../src/panel-controller.js';
 import type { AudioPlayer } from '../src/player.js';
 
@@ -176,6 +176,20 @@ describe('PanelController', () => {
     expect(loadConfig(root).voice).toBe(true);
     await s.controller.handle({ type: 'voice', on: false });
     expect(loadConfig(root).voice).toBe(false);
+  });
+
+  it('alternar la voz no deshace otras ediciones hechas en disco', async () => {
+    const s = setup({ voice: false });
+    saveConfig(root, { ...s.config, dailyLimitUsd: 0.75, cols: 90 });
+    await s.controller.handle({ type: 'voice', on: true });
+    s.controller.setVoice(false);
+    s.controller.setVoice(true);
+    const saved = loadConfig(root);
+    expect(saved.voice).toBe(true);
+    expect(saved.dailyLimitUsd).toBe(0.75);
+    expect(saved.cols).toBe(90);
+    expect(s.controller.voiceOn()).toBe(true);
+    expect(s.config.dailyLimitUsd).toBe(DEFAULT_DAILY_LIMIT_USD); // lo que usa el panel en memoria no cambia
   });
 
   it('un say nuevo detiene primero el audio anterior', async () => {
