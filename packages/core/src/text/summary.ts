@@ -150,11 +150,66 @@ function assignmentAt(word: string): number {
   return equals;
 }
 
+/** Palabras que anuncian un secreto (sin acentos y en minúsculas). */
+const SECRET_LABELS = new Set([
+  'password', 'passwords', 'passwd', 'pwd', 'contrasena', 'contrasenas', 'clave', 'claves', 'token',
+  'tokens', 'secret', 'secrets', 'secreto', 'secretos', 'apikey', 'api_key', 'api-key', 'accesskey',
+  'access_key', 'privatekey', 'private_key', 'llave', 'llaves',
+]);
+/** Primera palabra de «api key», «access key» y «private key». */
+const KEY_PREFIXES = new Set(['api', 'access', 'private']);
+/** Tokens tras una etiqueta en los que se busca el separador («del admin es:»). */
+const LABEL_WINDOW = 4;
+/** Largo máximo de un valor entre comillas que se descarta tras una etiqueta. */
+const MAX_QUOTED_SECRET = 200;
+const MAX_LABEL_LENGTH = 16;
+/** Signos que cortan la búsqueda del separador tras una etiqueta. */
+const WINDOW_BREAKERS = new Set([',', ';', '.', '!', '?', '…']);
+
+/** Minúsculas y sin acentos, solo para palabras cortas (así el costo sigue siendo lineal). */
+function fold(word: string): string {
+  if (word.length > MAX_LABEL_LENGTH) return '';
+  return word.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function isSecretLabel(word: string): boolean {
+  return SECRET_LABELS.has(fold(word));
+}
+
+function hasBreaker(text: string): boolean {
+  for (const char of text) if (WINDOW_BREAKERS.has(char)) return true;
+  return false;
+}
+
+/** Posición de `:` o `=` en `etiqueta":"valor` (etiqueta de secreto pegada a su valor no vacío), o -1. */
+function gluedLabelAt(word: string): number {
+  const limit = Math.min(word.length, MAX_LABEL_LENGTH + 3);
+  for (let i = 1; i < limit; i++) {
+    const char = word[i];
+    if (char !== ':' && char !== '=') continue;
+    let end = i;
+    while (end > 0 && (word[end - 1] === '"' || word[end - 1] === "'")) end--;
+    return i < word.length - 1 && isSecretLabel(word.slice(0, end)) ? i : -1;
+  }
+  return -1;
+}
+
+/** Comilla de apertura de un valor que empieza en `from` y no se cierra dentro de `text`, o null. */
+function unclosedQuote(text: string, from: number): string | null {
+  const quote = text[from];
+  if ((quote === '"' || quote === "'") && text.indexOf(quote, from + 1) === -1) return quote;
+  return null;
+}
+
 /** Quita rutas, URLs, secretos, marcas sueltas y énfasis palabra por palabra. */
 function cleanTokens(line: string): string {
   const out: string[] = [];
   let skipNext = false; // el valor que sigue a `Bearer`
   let openQuote: string | null = null; // valor entre comillas que sigue en otra palabra
+  let quoteBudget = Infinity; // caracteres que aún se descartan dentro de ese valor
+  let expectValue = false; // el valor que sigue a «clave:», «token es», «password =»…
+  let labelWindow = 0; // tokens que quedan para hallar el separador tras una etiqueta
+  let previous = ''; // palabra anterior (para «api key»)
   for (const token of line.split(/\s+/)) {
     if (token === '') continue;
     let start = 0;
@@ -163,29 +218,65 @@ function cleanTokens(line: string): string {
     while (end > start && TRAILING.has(token[end - 1]!)) end--;
     const core = token.slice(start, end);
     const trail = token.slice(end);
+    const word = token.slice(start);
+    const folded = fold(core);
+
+    // ¿Es el separador («:», «=», «es», «is») que sigue a una etiqueta de secreto?
+    let separator = false;
+    if (labelWindow > 0 && openQuote === null && !expectValue && !skipNext) {
+      const ended = hasBreaker(trail);
+      separator = token === ':' || token === '=' || ((folded === 'es' || folded === 'is') && !ended);
+      labelWindow = separator || ended ? 0 : labelWindow - 1;
+    }
 
     let dropped = false;
+    const glued = openQuote === null && !expectValue && !skipNext ? gluedLabelAt(word) : -1;
     if (openQuote !== null) {
       dropped = true;
-      if (token.includes(openQuote)) openQuote = null;
+      quoteBudget -= token.length + 1;
+      if (token.includes(openQuote) || quoteBudget <= 0) openQuote = null;
+    } else if (expectValue) {
+      dropped = true;
+      expectValue = false;
+      openQuote = unclosedQuote(token, 0);
+      quoteBudget = MAX_QUOTED_SECRET - token.length;
     } else if (skipNext) {
       dropped = true;
       skipNext = false;
     } else if (core.length === 6 && core.toLowerCase() === 'bearer') {
       dropped = true;
       skipNext = true;
+    } else if (token[0] === '-' && token.includes('=')) {
+      // `--token=abc`: cualquier opción con valor pegado.
+      dropped = true;
+      openQuote = unclosedQuote(token, token.indexOf('=') + 1);
+      quoteBudget = Infinity;
+    } else if (glued > 0) {
+      dropped = true;
+      openQuote = unclosedQuote(token, start + glued + 1);
+      quoteBudget = MAX_QUOTED_SECRET;
     } else {
-      const equals = assignmentAt(token.slice(start));
+      const equals = assignmentAt(word);
       if (equals > 0) {
         dropped = true;
-        const quote = token[start + equals + 1]!;
-        if ((quote === '"' || quote === "'") && token.indexOf(quote, start + equals + 2) === -1) {
-          openQuote = quote;
-        }
+        openQuote = unclosedQuote(token, start + equals + 1);
+        quoteBudget = Infinity;
       } else {
         dropped = core === '' || isUrl(core) || isPath(core) || onlySymbols(core) || isOpaque(core);
       }
     }
+
+    if (separator) expectValue = true;
+    if (!dropped) {
+      // Una etiqueta de secreto: «clave:», «clave es…», «api key», «"apiKey":».
+      const base = core.endsWith('=') ? core.slice(0, -1) : core;
+      if (isSecretLabel(base) || (fold(base) === 'key' && KEY_PREFIXES.has(previous))) {
+        if (trail.includes(':') || core.endsWith('=')) expectValue = true;
+        else if (!hasBreaker(trail)) labelWindow = LABEL_WINDOW;
+      }
+    }
+    previous = folded;
+
     if (dropped) {
       // Conserva el punto final de la frase para no pegar frases entre sí.
       const kept = keptTerminators(trail);

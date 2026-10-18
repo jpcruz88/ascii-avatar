@@ -93,6 +93,43 @@ describe('spokenSummary', () => {
     expect(spokenSummary('Pon A="ya cerrado" y sigue.')).toBe('Pon y sigue.');
   });
 
+  it.each([
+    ['La contraseña del admin es: hunter2pass', 'hunter2pass'],
+    ['Dime la CONTRASEÑA es hunter2pass ya.', 'hunter2pass'],
+    ['Ojo: password: s3cr3tValue y nada más.', 's3cr3tValue'],
+    ['Corre con --token=abcdefgh ahora.', 'abcdefgh'],
+    ['Usa -k=abcdefgh y sigue.', 'abcdefgh'],
+    ['El json es {"apiKey": "sk_live_abc"} y ya.', 'sk_live_abc'],
+    ['El json es {"apiKey":"sk_live_abc"} y ya.', 'sk_live_abc'],
+    ['la clave es 1234', '1234'],
+    ['La api key: zzz999 fin.', 'zzz999'],
+    ['La private key es zzz999 fin.', 'zzz999'],
+    ['The password is hunter2pass ok.', 'hunter2pass'],
+    ['Mi llave: "uno dos tres" fin.', 'dos'],
+    ['secreto = abc fin.', 'abc'],
+    ['passwd:xyz999 fin.', 'xyz999'],
+  ])('no dice el valor tras una etiqueta de secreto: %j', (input, secret) => {
+    const out = spokenSummary(input);
+    expect(out).not.toContain(secret);
+    expect(out).not.toContain('uno');
+    expect(out).not.toContain('tres');
+  });
+
+  it('conserva el resto de la frase al quitar el valor de un secreto', () => {
+    expect(spokenSummary('La clave es 1234. Luego sigue.')).toBe('La clave es. Luego sigue.');
+    expect(spokenSummary('Pon password: s3cr3tValue y listo.')).toBe('Pon password: y listo.');
+    expect(spokenSummary('Corre con --token=abcdefgh ahora.')).toBe('Corre con ahora.');
+  });
+
+  it('no toca una etiqueta sin separador ni una frase normal', () => {
+    expect(spokenSummary('Revisé la clave del problema')).toBe('Revisé la clave del problema');
+    expect(spokenSummary('Revisé la clave del problema, es que falla.')).toBe(
+      'Revisé la clave del problema, es que falla.',
+    );
+    expect(spokenSummary('Cambié el token de lugar.')).toBe('Cambié el token de lugar.');
+    expect(spokenSummary('Esa es la clave. Sigo con otra cosa.')).toBe('Esa es la clave. Sigo con otra cosa.');
+  });
+
   it('quita el valor tras Bearer', () => {
     expect(spokenSummary('Authorization: Bearer abc.def.ghi y listo.')).toBe('Authorization: y listo.');
     expect(spokenSummary('Cabecera bearer xyz fin.')).toBe('Cabecera fin.');
@@ -231,6 +268,10 @@ describe('spokenSummary', () => {
       ':1'.repeat(100_000) + 'x',
       'API_KEY="'.repeat(30_000),
       'bearer '.repeat(30_000),
+      'password: '.repeat(20_000),
+      'la clave es '.repeat(17_000),
+      '--token='.repeat(25_000),
+      'password: "'.repeat(18_000),
       'data:a/'.repeat(30_000),
       'a1'.repeat(100_000),
     ];
