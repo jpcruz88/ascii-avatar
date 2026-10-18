@@ -19,6 +19,7 @@
     "dist"
   ],
   "dependencies": {
+    "@ascii-avatar/core": "*",
     "@google/genai": "^2.30.0"
   }
 }
