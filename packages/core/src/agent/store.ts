@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { decodeImage } from '../ascii/decode.js';
 import { imageToAscii } from '../ascii/convert.js';
 import type { AsciiFrame, AsciiMode } from '../ascii/types.js';
 import { FACE_IDS, type FaceId } from '../faces.js';
+import { writeFileAtomic } from './atomic.js';
 
 /** Datos del agente que se guardan en `agent.json`. */
 export interface AgentConfig {
@@ -41,6 +42,13 @@ export class AgentExistsError extends Error {
   constructor(name: string) {
     super(`Ya existe un agente llamado "${name}".`);
     this.name = 'AgentExistsError';
+  }
+}
+
+export class CorruptAgentError extends Error {
+  constructor(name: string, detail: string) {
+    super(`El archivo agent.json del agente "${name}" está dañado: ${detail}.`);
+    this.name = 'CorruptAgentError';
   }
 }
 
@@ -97,15 +105,38 @@ export function createAgent(
     promptsVersion: opts.promptsVersion ?? 1,
   };
   mkdirSync(join(dir, 'faces'), { recursive: true });
-  writeFileSync(join(dir, `photo.${ext}`), photo);
-  writeFileSync(join(dir, 'agent.json'), `${JSON.stringify(config, null, 2)}\n`);
+  // agent.json va al final: su existencia indica que el agente quedó completo.
+  writeFileAtomic(join(dir, `photo.${ext}`), photo);
+  writeFileAtomic(join(dir, 'agent.json'), `${JSON.stringify(config, null, 2)}\n`);
   return config;
 }
 
 export function loadAgent(root: string, name: string): AgentConfig {
   const file = join(agentDir(root, name), 'agent.json');
   if (!existsSync(file)) throw new AgentNotFoundError(name);
-  return JSON.parse(readFileSync(file, 'utf8')) as AgentConfig;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    throw new CorruptAgentError(name, 'no es JSON válido');
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new CorruptAgentError(name, 'no es un objeto');
+  }
+  const c = raw as Record<string, unknown>;
+  if (
+    typeof c.name !== 'string' ||
+    typeof c.voice !== 'string' ||
+    typeof c.personality !== 'string' ||
+    typeof c.createdAt !== 'string' ||
+    typeof c.promptsVersion !== 'number'
+  ) {
+    throw new CorruptAgentError(name, 'faltan campos o tienen un tipo incorrecto');
+  }
+  if (c.name !== name) {
+    throw new CorruptAgentError(name, `el nombre guardado es "${c.name}"`);
+  }
+  return c as unknown as AgentConfig;
 }
 
 /** Guarda el PNG de una cara en `faces/<id>.png`. */
@@ -115,7 +146,7 @@ export function saveFace(root: string, name: string, id: FaceId, png: Buffer): v
     throw new Error(`Cara desconocida: ${JSON.stringify(id)}.`);
   }
   mkdirSync(join(dir, 'faces'), { recursive: true });
-  writeFileSync(join(dir, 'faces', `${id}.png`), png);
+  writeFileAtomic(join(dir, 'faces', `${id}.png`), png);
 }
 
 /** Caras que aún no tienen PNG, en el orden de `FACE_IDS`. */

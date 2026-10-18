@@ -7,6 +7,7 @@ export { cornerDrift } from './ascii/drift.js';
 export {
   AgentExistsError,
   AgentNotFoundError,
+  CorruptAgentError,
   InvalidAgentNameError,
   InvalidPhotoError,
   createAgent,

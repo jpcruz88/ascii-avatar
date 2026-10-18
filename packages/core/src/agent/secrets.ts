@@ -1,5 +1,6 @@
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { writeFileAtomic } from './atomic.js';
 
 const secretsFile = (root: string): string => join(root, 'secrets.json');
 
@@ -9,10 +10,11 @@ const secretsFile = (root: string): string => join(root, 'secrets.json');
  */
 export function saveApiKey(root: string, key: string): void {
   mkdirSync(root, { recursive: true, mode: 0o700 });
-  const file = secretsFile(root);
-  writeFileSync(file, `${JSON.stringify({ geminiApiKey: key })}\n`, { mode: 0o600 });
-  // `mode` solo aplica al crear el archivo; esto cubre el caso de que ya existiera.
-  chmodSync(file, 0o600);
+  // `mode` de mkdir no toca una carpeta que ya existía: se fuerza aparte.
+  chmodSync(root, 0o700);
+  // El temporal nace con 0600 y se renombra encima, así que el archivo final
+  // tiene 0600 aunque ya existiera con otros permisos.
+  writeFileAtomic(secretsFile(root), `${JSON.stringify({ geminiApiKey: key })}\n`, 0o600);
 }
 
 /** Primero `GEMINI_API_KEY` (si no está vacía), luego el archivo; si no hay, `undefined`. */

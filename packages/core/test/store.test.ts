@@ -1,11 +1,18 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import * as fs from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, renameSync: vi.fn(actual.renameSync) };
+});
 import {
   AgentExistsError,
   AgentNotFoundError,
+  CorruptAgentError,
   FACE_IDS,
   InvalidAgentNameError,
   InvalidPhotoError,
@@ -25,6 +32,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.mocked(fs.renameSync).mockClear();
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -151,5 +159,115 @@ describe('loadAtlas', () => {
     await expect(loadAtlas(root, 'luna', { cols: 4, mode: 'glyphs' })).rejects.toThrow(
       /faltan.*mouth_mid.*sad/i,
     );
+  });
+});
+
+describe('escritura atómica', () => {
+  it('saveFace no deja archivos .tmp en faces/', async () => {
+    const photo = await png4x4(10);
+    createAgent(root, 'luna', photo);
+    saveFace(root, 'luna', 'neutral', photo);
+    const left = readdirSync(join(root, 'agents', 'luna', 'faces'));
+    expect(left).toEqual(['neutral.png']);
+  });
+
+  it('un neutral.png.tmp suelto no cuenta como cara', async () => {
+    const photo = await png4x4(10);
+    createAgent(root, 'luna', photo);
+    writeFileSync(join(root, 'agents', 'luna', 'faces', 'neutral.png.tmp'), 'parcial');
+    expect(missingFaces(root, 'luna')).toEqual([...FACE_IDS]);
+    expect(missingFaces(root, 'luna')).toContain('neutral');
+  });
+
+  it('una escritura parcial (solo .tmp) deja la cara como faltante', async () => {
+    const photo = await png4x4(10);
+    createAgent(root, 'luna', photo);
+    writeFileSync(join(root, 'agents', 'luna', 'faces', 'smile.png.tmp'), 'parcial');
+    saveFace(root, 'luna', 'neutral', photo);
+    expect(missingFaces(root, 'luna')).toEqual(FACE_IDS.filter((id) => id !== 'neutral'));
+    await expect(loadAtlas(root, 'luna', { cols: 4, mode: 'glyphs' })).rejects.toThrow(/smile/);
+  });
+
+  it('createAgent escribe agent.json al final y sin dejar .tmp', async () => {
+    const photo = await png4x4(10);
+    const dir = join(root, 'agents', 'luna');
+    const photoAtRename: boolean[] = [];
+    const real = vi.mocked(fs.renameSync).getMockImplementation()!;
+    vi.mocked(fs.renameSync).mockImplementation(((from: string, to: string) => {
+      if (String(to).endsWith('agent.json')) {
+        photoAtRename.push(existsSync(join(dir, 'photo.png')));
+        expect(existsSync(to)).toBe(false);
+      }
+      return real(from, to);
+    }) as typeof fs.renameSync);
+    createAgent(root, 'luna', photo);
+    vi.mocked(fs.renameSync).mockReset();
+    expect(photoAtRename).toEqual([true]);
+    expect(readdirSync(dir).sort()).toEqual(['agent.json', 'faces', 'photo.png']);
+  });
+
+  it('un fallo al renombrar agent.json no deja agente a medias', async () => {
+    const photo = await png4x4(10);
+    const real = vi.mocked(fs.renameSync).getMockImplementation()!;
+    vi.mocked(fs.renameSync).mockImplementation(((from: string, to: string) => {
+      if (String(to).endsWith('agent.json')) throw new Error('disco lleno');
+      return real(from, to);
+    }) as typeof fs.renameSync);
+    expect(() => createAgent(root, 'luna', photo)).toThrow('disco lleno');
+    vi.mocked(fs.renameSync).mockReset();
+    const dir = join(root, 'agents', 'luna');
+    expect(existsSync(join(dir, 'agent.json'))).toBe(false);
+    expect(readdirSync(dir).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+    // Se puede reintentar: no queda un AgentExistsError permanente.
+    expect(() => createAgent(root, 'luna', photo)).not.toThrow();
+  });
+});
+
+describe('loadAgent con agent.json dañado', () => {
+  function writeRaw(name: string, content: string): void {
+    const dir = join(root, 'agents', name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'agent.json'), content);
+  }
+  const good = {
+    name: 'luna',
+    voice: 'Kore',
+    personality: '',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    promptsVersion: 1,
+  };
+
+  it('JSON truncado lanza CorruptAgentError', () => {
+    writeRaw('luna', '{"name": "lu');
+    expect(() => loadAgent(root, 'luna')).toThrow(CorruptAgentError);
+  });
+
+  it.each([
+    ['sin name', { ...good, name: undefined }],
+    ['voice mal tipado', { ...good, voice: 3 }],
+    ['personality mal tipada', { ...good, personality: null }],
+    ['createdAt mal tipado', { ...good, createdAt: 5 }],
+    ['promptsVersion mal tipada', { ...good, promptsVersion: '1' }],
+    ['name distinto de la carpeta', { ...good, name: 'otro' }],
+  ])('forma incorrecta (%s) lanza CorruptAgentError', (_t, value) => {
+    writeRaw('luna', JSON.stringify(value));
+    expect(() => loadAgent(root, 'luna')).toThrow(CorruptAgentError);
+  });
+
+  it('no es un objeto: lanza CorruptAgentError', () => {
+    writeRaw('luna', 'null');
+    expect(() => loadAgent(root, 'luna')).toThrow(CorruptAgentError);
+    writeRaw('luna', '[]');
+    expect(() => loadAgent(root, 'luna')).toThrow(CorruptAgentError);
+  });
+
+  it('el mensaje está en español', () => {
+    writeRaw('luna', 'xx');
+    expect(() => loadAgent(root, 'luna')).toThrow(/dañado|corrupto/i);
+  });
+
+  it('un agent.json válido sigue cargando', () => {
+    writeRaw('luna', JSON.stringify(good));
+    expect(loadAgent(root, 'luna')).toEqual(good);
   });
 });

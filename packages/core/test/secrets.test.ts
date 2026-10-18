@@ -1,5 +1,7 @@
+import * as fs from 'node:fs';
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -10,7 +12,12 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, renameSync: vi.fn(actual.renameSync) };
+});
 import { FACE_IDS, createAgent, loadApiKey, saveApiKey, saveFace } from '../src/index.js';
 
 let root: string;
@@ -20,6 +27,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.mocked(fs.renameSync).mockReset();
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -57,6 +65,33 @@ describe('llave de API', () => {
     saveApiKey(root, 'K2');
     expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(loadApiKey(root, {})).toBe('K2');
+  });
+
+  it('no deja archivos .tmp tras guardar', () => {
+    saveApiKey(root, 'K');
+    expect(readdirSync(root)).toEqual(['secrets.json']);
+  });
+
+  it('si falla el renombrado se conserva la llave anterior y no queda .tmp', () => {
+    saveApiKey(root, 'VIEJA');
+    const file = join(root, 'secrets.json');
+    chmodSync(file, 0o644);
+    const actual = vi.mocked(fs.renameSync).getMockImplementation();
+    vi.mocked(fs.renameSync).mockImplementation(() => {
+      throw new Error('fallo simulado');
+    });
+    expect(() => saveApiKey(root, 'NUEVA')).toThrow('fallo simulado');
+    vi.mocked(fs.renameSync).mockImplementation(actual!);
+    expect(loadApiKey(root, {})).toBe('VIEJA');
+    expect(readdirSync(root)).toEqual(['secrets.json']);
+  });
+
+  it('endurece una raíz existente con permisos abiertos a 0700', () => {
+    const open = join(root, 'abierta');
+    mkdirSync(open, { mode: 0o755 });
+    chmodSync(open, 0o755);
+    saveApiKey(open, 'K');
+    expect(statSync(open).mode & 0o777).toBe(0o700);
   });
 
   it('devuelve undefined sin llave o con archivo corrupto', () => {
