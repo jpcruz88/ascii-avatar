@@ -1,9 +1,191 @@
 #!/usr/bin/env node
-// Punto de entrada del comando `avatar`. Los demás comandos se agregan en tareas posteriores.
-import { runPanel } from './commands/panel.js';
+// Punto de entrada del comando `avatar`. Cada subcomando carga sus módulos al usarse:
+// `avatar hook` corre en cada turno de Claude Code y debe arrancar rápido.
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { parseArgs, type ParsedArgs } from './args.js';
 import { defaultRoot } from './config.js';
 
-const [command] = process.argv.slice(2);
-if (command === 'panel') {
-  process.exitCode = await runPanel({ root: defaultRoot() });
+const HELP = `avatar: avatar ASCII animado para la terminal.
+
+Uso:
+  avatar create <nombre> [--foto <ruta>]   Crea un agente a partir de una foto
+  avatar panel [--agente <nombre>] [--cols <n>] [--modo glyphs|halfblock]
+                                           Abre el panel (tecla v: voz, q: salir)
+  avatar voice on|off                      Activa o desactiva la voz
+  avatar install-hook [--uninstall] [--settings <ruta>]
+                                           Conecta (o desconecta) el avatar con Claude Code
+  avatar help                              Muestra esta ayuda
+`;
+
+const fail = (message: string): number => {
+  console.error(message);
+  return 1;
+};
+
+async function hook(): Promise<void> {
+  // Claude Code suma lo que el hook escriba a su contexto: aquí no se escribe nada, pase lo que pase.
+  const quiet = (): void => undefined;
+  process.stdout.on('error', quiet);
+  process.stderr.on('error', quiet);
+  process.on('uncaughtException', () => process.exit(0));
+  process.on('unhandledRejection', () => process.exit(0));
+  setTimeout(() => process.exit(0), 400);
+  try {
+    const { runHook } = await import('./commands/hook.js');
+    const root = defaultRoot();
+    const input = await readStdin(1024 * 1024, 200);
+    await runHook(input, root);
+  } catch {
+    // Nunca debe romper a Claude Code.
+  }
+  process.exit(0);
+}
+
+/** Lee stdin hasta `maxBytes` (descarta el resto), el fin de la entrada o `waitMs`, lo que ocurra primero. */
+function readStdin(maxBytes: number, waitMs: number): Promise<string> {
+  return new Promise((resolve) => {
+    if (process.stdin.isTTY) return resolve('');
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const done = (): void => {
+      clearTimeout(timer);
+      process.stdin.removeAllListeners('data');
+      process.stdin.pause();
+      resolve(Buffer.concat(chunks).toString('utf8'));
+    };
+    const timer = setTimeout(done, waitMs);
+    process.stdin.on('data', (chunk: Buffer) => {
+      chunks.push(chunk);
+      size += chunk.length;
+      if (size >= maxBytes) done();
+    });
+    process.stdin.once('end', done);
+    process.stdin.once('error', done);
+  });
+}
+
+async function create(args: ParsedArgs, root: string): Promise<number> {
+  const [name] = args.positionals;
+  if (name === undefined) return fail('Uso: avatar create <nombre> [--foto <ruta>]');
+  const { existsSync } = await import('node:fs');
+  const { Ledger, loadApiKey, saveApiKey, validateAgentName } = await import('@ascii-avatar/core');
+  const { createGeminiImageClient, loadGeminiConfig } = await import('@ascii-avatar/gemini');
+  const { runCreate } = await import('./commands/create.js');
+  const { ensureRoot, ledgerPath, loadConfig } = await import('./config.js');
+  const { askLine, askSecret, askYesNo, cleanPath, PromptAborted } = await import('./prompts.js');
+  try {
+    validateAgentName(name);
+    let photoPath = typeof args.flags.foto === 'string' ? cleanPath(args.flags.foto) : undefined;
+    if (photoPath === undefined && !existsSync(join(root, 'agents', name, 'agent.json'))) {
+      photoPath = cleanPath(await askLine('Ruta de la foto (PNG, JPG o WebP):'));
+    }
+    let key = loadApiKey(root);
+    if (key === undefined) {
+      key = await askSecret('Llave de la API de Gemini (no se muestra al escribir):');
+      if (key === '') return fail('Hace falta la llave de Gemini. Consíguela en https://aistudio.google.com/apikey');
+      saveApiKey(root, key);
+    }
+    ensureRoot(root);
+    const config = loadConfig(root);
+    const result = await runCreate({
+      root,
+      name,
+      ...(photoPath === undefined ? {} : { photoPath }),
+      imageClient: createGeminiImageClient(loadGeminiConfig(process.env, key)),
+      ledger: new Ledger(ledgerPath(root)),
+      ask: askYesNo,
+      out: (line) => void process.stdout.write(`${line}\n`),
+      mode: config.mode,
+      cols: config.cols,
+    });
+    (result.status === 'failed' ? console.error : console.log)(result.message);
+    return result.status === 'failed' ? 1 : 0;
+  } catch (error) {
+    if (error instanceof PromptAborted) return fail(error.message);
+    // Solo el mensaje: nunca la llave ni trazas.
+    return fail(error instanceof Error ? error.message.split('\n')[0] ?? 'Error.' : 'Error.');
+  }
+}
+
+async function panel(args: ParsedArgs, root: string): Promise<number> {
+  const { validateAgentName } = await import('@ascii-avatar/core');
+  const { agente, cols, modo } = args.flags;
+  try {
+    if (agente === true || cols === true || modo === true) return fail('Faltan valores en las opciones.');
+    if (agente !== undefined) validateAgentName(agente);
+    if (cols !== undefined && !(/^\d+$/.test(cols) && Number(cols) >= 20 && Number(cols) <= 500)) {
+      return fail('--cols debe ser un número entero entre 20 y 500.');
+    }
+    if (modo !== undefined && modo !== 'glyphs' && modo !== 'halfblock') {
+      return fail('--modo debe ser glyphs o halfblock.');
+    }
+    const { runPanel } = await import('./commands/panel.js');
+    return await runPanel({
+      root,
+      ...(agente === undefined ? {} : { agent: agente }),
+      ...(cols === undefined ? {} : { cols: Number(cols) }),
+      ...(modo === undefined ? {} : { mode: modo }),
+    });
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : 'Error.');
+  }
+}
+
+async function installHookCmd(args: ParsedArgs): Promise<number> {
+  const { installHook, uninstallHook } = await import('./commands/install-hook.js');
+  const flag = args.flags.settings;
+  if (flag === true) return fail('Falta la ruta después de --settings.');
+  const path = flag ?? join(homedir(), '.claude', 'settings.json');
+  try {
+    const uninstall = args.flags.uninstall === true;
+    const r = uninstall ? uninstallHook(path) : installHook(path);
+    if (!r.changed) {
+      console.log(uninstall ? `No había nada que quitar en ${path}.` : `El hook ya estaba instalado en ${path}.`);
+      return 0;
+    }
+    console.log(uninstall ? `Hook quitado de ${path}.` : `Hook instalado en ${path} (eventos Stop y UserPromptSubmit).`);
+    if (r.backupPath !== undefined) console.log(`Copia de respaldo: ${r.backupPath}`);
+    console.log('Si tienes sesiones de Claude Code abiertas, reinícialas para que lean el cambio.');
+    return 0;
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : 'Error.');
+  }
+}
+
+async function main(argv: string[]): Promise<number> {
+  const root = defaultRoot();
+  let args: ParsedArgs;
+  try {
+    args = parseArgs(argv);
+  } catch (error) {
+    return fail(`${error instanceof Error ? error.message : 'Argumentos no válidos.'}\n\n${HELP}`);
+  }
+  switch (args.cmd) {
+    case undefined:
+    case 'help':
+      console.log(HELP);
+      return 0;
+    case 'create':
+      return create(args, root);
+    case 'panel':
+      return panel(args, root);
+    case 'voice': {
+      const { runVoice } = await import('./commands/voice.js');
+      const r = await runVoice(args.positionals[0] ?? '', root);
+      (r.ok ? console.log : console.error)(r.message);
+      return r.ok ? 0 : 1;
+    }
+    case 'install-hook':
+      return installHookCmd(args);
+    default:
+      return fail(`Comando desconocido: ${args.cmd}\n\n${HELP}`);
+  }
+}
+
+// `hook` se despacha antes que nada, sin pasar por parseArgs: no puede fallar ni escribir.
+if (process.argv[2] === 'hook') {
+  await hook();
+} else {
+  process.exitCode = await main(process.argv.slice(2));
 }
