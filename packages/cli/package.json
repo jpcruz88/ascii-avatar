@@ -15,6 +15,7 @@
   ],
   "dependencies": {
     "@ascii-avatar/core": "*",
-    "@ascii-avatar/gemini": "*"
+    "@ascii-avatar/gemini": "*",
+    "sharp": "^0.35.5"
   }
 }
