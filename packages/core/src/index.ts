@@ -3,3 +3,4 @@ export type { AsciiFrame, AsciiMode, Cell, RawImage, Rgb } from './ascii/types.j
 export { decodeImage } from './ascii/decode.js';
 export { imageToAscii } from './ascii/convert.js';
 export { frameDiff, frameToAnsi } from './ascii/ansi.js';
+export { cornerDrift } from './ascii/drift.js';
