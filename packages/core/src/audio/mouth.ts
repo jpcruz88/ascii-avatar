@@ -123,11 +123,20 @@ export function mouthTimeline(samples: Float32Array, sampleRate: number): MouthS
 const VOWEL_GROUPS = /[aeiouáéíóúüàèìòùâêîôû]+/giu;
 const WORDS = /[\p{L}\p{N}]+/gu;
 const ACCENTED = /[áéíóúàèìòùâêîôû]/iu;
-/** Peso (en caracteres) de las pausas: la puntuación alarga el silencio sin cambiar la duración. */
+/**
+ * Peso (en caracteres de 55 ms) de las pausas: la puntuación alarga el silencio y la duración. Un
+ * fin de frase deja la boca cerrada unos 440 ms (lo bastante para que el avatar asienta entre
+ * frases) y una coma unos 220 ms.
+ */
 const SHORT_PAUSE = /[,;:]/u;
 const LONG_PAUSE = /[.!?…]/u;
 const SHORT_PAUSE_WEIGHT = 3;
-const LONG_PAUSE_WEIGHT = 4;
+const LONG_PAUSE_WEIGHT = 7;
+
+/** Peso de un carácter: 1, o más si es puntuación. */
+function charWeight(c: string): number {
+  return SHORT_PAUSE.test(c) ? SHORT_PAUSE_WEIGHT : LONG_PAUSE.test(c) ? LONG_PAUSE_WEIGHT : 1;
+}
 
 /** Cuánto abre cada vocal en su sílaba tónica: la a abre más, la i y la u menos. */
 function vowelOpenness(vowels: string): number {
@@ -164,7 +173,7 @@ function syllables(text: string, durationMs: number): Syllable[] {
   let total = 0;
   for (const c of text) {
     startWeight.push(total);
-    total += SHORT_PAUSE.test(c) ? SHORT_PAUSE_WEIGHT : LONG_PAUSE.test(c) ? LONG_PAUSE_WEIGHT : 1;
+    total += charWeight(c);
     if (c.length === 2) startWeight.push(total - 0.5);
   }
   startWeight.push(total);
@@ -207,11 +216,15 @@ function syllables(text: string, durationMs: number): Syllable[] {
  * cada sílaba aproximada (corte antes de cada grupo de vocales; una palabra sin vocales es una
  * sílaba) dibuja un arco que abre y cierra pasando por los niveles intermedios. La vocal decide
  * cuánto abre (a > e, o > i, u), la sílaba tónica abre más y un hash del texto varía los picos.
- * Entre palabras la boca cierra un momento y la puntuación la deja cerrada más tiempo. Dura
- * `max(1200, 55 * caracteres)` ms, empieza y termina en 0 y nunca salta más de un nivel por paso.
+ * Entre palabras la boca cierra un momento y la puntuación la deja cerrada más tiempo (un fin de
+ * frase unos 440 ms, una coma unos 220 ms). Dura 55 ms por carácter, con cada coma contando como 3
+ * y cada fin de frase como 7, y al menos 1200 ms; empieza y termina en 0 y nunca salta más de un
+ * nivel por paso.
  */
 export function syntheticMouthTimeline(text: string): { steps: MouthStep[]; durationMs: number } {
-  const durationMs = Math.max(SYNTHETIC_MIN_MS, SYNTHETIC_MS_PER_CHAR * text.length);
+  let weight = text.length;
+  for (const c of text) weight += charWeight(c) - 1;
+  const durationMs = Math.max(SYNTHETIC_MIN_MS, SYNTHETIC_MS_PER_CHAR * weight);
   const sylls = syllables(text, durationMs);
   const ticks = Math.floor(durationMs / SYNTHETIC_TICK_MS);
 

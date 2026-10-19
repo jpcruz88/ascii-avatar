@@ -255,8 +255,13 @@ describe('syntheticMouthTimeline', () => {
     expect(steps.at(-1)!.level).toBe(0);
   });
 
-  it('la duración es max(1200, 55 por carácter)', () => {
-    expect(syntheticMouthTimeline(TEXT_60).durationMs).toBe(3300);
+  it('la duración es 55 ms por carácter, con la puntuación contando como pausa, y al menos 1200', () => {
+    // TEXT_60 tiene una coma, que pesa 3 caracteres: 62 × 55.
+    expect(syntheticMouthTimeline(TEXT_60).durationMs).toBe(3410);
+    // Un punto pesa 7: 'Sí. No.' son 5 caracteres normales + 2 puntos = 19 × 55 = 1045 → 1200.
+    expect(syntheticMouthTimeline('Sí. No.').durationMs).toBe(1200);
+    const two = 'Hecho. Corregí el error de la prueba y ahora todo pasa bien.';
+    expect(syntheticMouthTimeline(two).durationMs).toBe((two.length + 2 * 6) * 55);
     expect(syntheticMouthTimeline('Hola').durationMs).toBe(1200);
     expect(syntheticMouthTimeline('a'.repeat(100)).durationMs).toBe(5500);
   });
@@ -276,6 +281,21 @@ describe('syntheticMouthTimeline', () => {
       (s, i) => i > 0 && i < steps.length - 1 && s.level > steps[i - 1]!.level && s.level > steps[i + 1]!.level,
     );
     expect(new Set(peaks.map((p) => p.level)).size).toBeGreaterThanOrEqual(2);
+  });
+
+  it('el fin de frase cierra la boca al menos 420 ms y una coma unos 200 ms', () => {
+    const text = 'Listo, ya revisé los cambios. Las pruebas pasan sin errores. Puedes seguir cuando quieras.';
+    const { steps, durationMs } = syntheticMouthTimeline(text);
+    const lengths = runLengths(steps, durationMs);
+    const closures = steps
+      .map((st, i) => (st.level === 0 && i > 0 && i < steps.length - 1 ? lengths[i]! : 0))
+      .filter((ms) => ms > 0)
+      .sort((a, b) => b - a);
+    // Dos fines de frase interiores y una coma.
+    expect(closures[0]).toBeGreaterThanOrEqual(420);
+    expect(closures[1]).toBeGreaterThanOrEqual(420);
+    expect(closures[2]).toBeGreaterThanOrEqual(200);
+    expect(closures[2]).toBeLessThan(420);
   });
 
   it('la puntuación cierra la boca más tiempo que un simple espacio', () => {

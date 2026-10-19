@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Animator, CLIP_FPS, MOUTH_ANTICIPATION_MS } from '../src/index.js';
+import { Animator, CLIP_FPS, MOUTH_ANTICIPATION_MS, syntheticMouthTimeline } from '../src/index.js';
 import type { ExpressionId, Motion, MouthStep } from '../src/index.js';
 
 const zero = () => 0;
@@ -506,6 +506,21 @@ describe('Animator hablando con gestos', () => {
     const frames = [0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => a.frame(mid(740, i)));
     expect(frames).toEqual([0, 1, 2, 3, 4, 3, 2, 1, 0].map((i) => `clip:nod:${i}`));
     expect(a.frame(740 + 9 * FRAME)).toBe('neutral');
+  });
+
+  it('sin voz (boca sintética), una respuesta normal de 2 o 3 frases asiente al menos una vez', () => {
+    for (const text of [
+      'Listo, ya revisé los cambios. Las pruebas pasan sin errores. Puedes seguir cuando quieras.',
+      'Hecho. Corregí el error de la prueba y ahora todo pasa bien.',
+      'Revisé el archivo, encontré dos problemas y los arreglé. ¿Quieres que suba los cambios?',
+    ]) {
+      const a = new Animator({ rng: zero, motion: { poses: [], clips: { nod: 16 } } });
+      const { steps, durationMs } = syntheticMouthTimeline(text);
+      a.say(0, { steps, durationMs, expression: 'neutral' });
+      let nods = 0;
+      for (let t = 0; t < 500 + durationMs; t += 10) if (a.frame(t).startsWith('clip:nod:')) nods++;
+      expect(nods, text).toBeGreaterThan(0);
+    }
   });
 
   it('una pausa de menos de 350 ms no lleva gesto', () => {
