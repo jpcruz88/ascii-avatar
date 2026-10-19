@@ -24,6 +24,23 @@ describe('toPng', () => {
     expect(out.subarray(0, 8).equals(PNG_SIGNATURE)).toBe(true);
   });
 
+  it('con un tamaño, lo lleva a ese lienzo sin deformar y rellena con papel blanco', async () => {
+    const jpeg = await sharp({ create: { width: 40, height: 40, channels: 3, background: '#000' } }).jpeg().toBuffer();
+    const out = await toPng(jpeg, { width: 32, height: 48 });
+    expect(out.subarray(0, 8).equals(PNG_SIGNATURE)).toBe(true);
+    const { data, info } = await sharp(out).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    expect([info.width, info.height]).toEqual([32, 48]);
+    // La imagen cuadrada queda centrada: arriba hay relleno blanco y al centro sigue la tinta negra.
+    expect(data[0]).toBeGreaterThan(240);
+    expect(data[(24 * 32 + 16) * 3]).toBeLessThan(15);
+  });
+
+  it('con el mismo tamaño que ya tiene, no lo cambia', async () => {
+    const out = await toPng(await sharp(raw).jpeg().toBuffer(), { width: 32, height: 48 });
+    const meta = await sharp(out).metadata();
+    expect([meta.width, meta.height]).toEqual([32, 48]);
+  });
+
   it('bytes que no son una imagen: lanza', async () => {
     await expect(toPng(Buffer.from('no soy una imagen'))).rejects.toThrow();
   });

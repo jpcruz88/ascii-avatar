@@ -82,6 +82,8 @@ function makeDeps(overrides: Partial<CreateDeps> & { answers?: boolean[] } = {})
     },
     mode: 'halfblock',
     cols: 20,
+    // Este archivo prueba el flujo realista de siempre (`--estilo foto`); el grabado va en create-grabado.test.ts.
+    style: 'foto',
     ...rest,
   };
 }

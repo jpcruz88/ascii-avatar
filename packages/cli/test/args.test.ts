@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isModo, parseArgs, unknownFlags } from '../src/args.js';
+import { isEstilo, isModo, parseArgs, unknownFlags } from '../src/args.js';
 
 describe('parseArgs', () => {
   it('separa comando, posicionales y banderas con valor', () => {
@@ -87,6 +87,26 @@ describe('unknownFlags', () => {
     expect(unknownFlags('voz', { voz: 'Kore', tono: 'x' })).toEqual(['tono']);
     expect(unknownFlags('voice', { voz: 'Kore' })).toEqual(['voz']);
     expect(unknownFlags('create', { agente: 'x', foto: 'y' })).toEqual(['agente']);
+  });
+});
+
+describe('create --estilo y --sin-poses', () => {
+  it('--estilo lleva valor, --sin-poses es un interruptor y ambas son de create', () => {
+    expect(parseArgs(['create', 'ana', '--foto', 'a.png', '--estilo', 'foto', '--sin-poses']).flags).toEqual({
+      foto: 'a.png',
+      estilo: 'foto',
+      'sin-poses': true,
+    });
+    expect(unknownFlags('create', { foto: 'a.png', estilo: 'grabado', 'sin-poses': true })).toEqual([]);
+    expect(unknownFlags('panel', { 'sin-poses': true })).toEqual(['sin-poses']);
+  });
+
+  it('isEstilo reconoce grabado y foto y nada más', () => {
+    expect(isEstilo('grabado')).toBe(true);
+    expect(isEstilo('foto')).toBe(true);
+    expect(isEstilo('acuarela')).toBe(false);
+    expect(isEstilo(true)).toBe(false);
+    expect(isEstilo(undefined)).toBe(false);
   });
 });
 

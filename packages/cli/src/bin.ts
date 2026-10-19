@@ -4,13 +4,16 @@
 // cada turno de Claude Code y no puede tocar `sharp` ni `@ascii-avatar/*` (una falla nativa lo rompería).
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { isModo, parseArgs, unknownFlags, type ParsedArgs } from './args.js';
+import { isEstilo, isModo, parseArgs, unknownFlags, type ParsedArgs } from './args.js';
 import { defaultRoot } from './paths.js';
 
 const HELP = `avatar: avatar ASCII animado para la terminal.
 
 Uso:
-  avatar create <nombre> [--foto <ruta>]   Crea un agente a partir de una foto (usa Gemini)
+  avatar create <nombre> [--foto <ruta>] [--estilo grabado|foto] [--sin-poses]
+                                           Crea un agente a partir de una foto (usa Gemini). Por defecto,
+                                           estilo grabado: 8 caras y 8 poses (16 imágenes); --sin-poses
+                                           genera solo las caras; --estilo foto, las 8 caras realistas
   avatar create <nombre> --caras <carpeta> [--foto <ruta>] [--poses <carpeta>] [--clips <carpeta>]
                                            Importa tus propias 8 caras PNG y, si quieres, poses y clips
                                            de movimiento (sin Gemini, sin llave, sin costo)
@@ -112,13 +115,21 @@ async function importFaces(name: string, dirs: ImportDirs, photo: string | true 
 async function create(args: ParsedArgs, root: string): Promise<number> {
   const [name] = args.positionals;
   if (name === undefined) {
-    return fail('Uso: avatar create <nombre> [--foto <ruta>] [--caras <carpeta>] [--poses <carpeta>] [--clips <carpeta>]');
+    return fail(
+      'Uso: avatar create <nombre> [--foto <ruta>] [--estilo grabado|foto] [--sin-poses] [--caras <carpeta>] [--poses <carpeta>] [--clips <carpeta>]',
+    );
   }
-  const { caras, poses, clips } = args.flags;
+  const { caras, poses, clips, estilo } = args.flags;
+  const sinPoses = args.flags['sin-poses'];
   for (const [flag, value] of [['caras', caras], ['poses', poses], ['clips', clips]] as const) {
     if (value === true) return fail(`Falta la carpeta después de --${flag}.`);
   }
+  if (estilo !== undefined && !isEstilo(estilo)) return fail('--estilo debe ser grabado o foto.');
+  if (sinPoses !== undefined && sinPoses !== true) return fail('--sin-poses no lleva valor.');
   if (caras !== undefined || poses !== undefined || clips !== undefined) {
+    if (estilo !== undefined || sinPoses !== undefined) {
+      return fail('--estilo y --sin-poses son para generar con Gemini: no se combinan con --caras, --poses ni --clips.');
+    }
     const dirs: ImportDirs = {
       ...(typeof caras === 'string' ? { caras } : {}),
       ...(typeof poses === 'string' ? { poses } : {}),
@@ -157,6 +168,8 @@ async function create(args: ParsedArgs, root: string): Promise<number> {
       mode: config.mode,
       cols: config.cols,
       mxnPorUsd: config.mxnPorUsd,
+      ...(isEstilo(estilo) ? { style: estilo } : {}),
+      ...(sinPoses === true ? { poses: false } : {}),
     });
     (result.status === 'failed' ? console.error : console.log)(result.message);
     return result.status === 'failed' ? 1 : 0;

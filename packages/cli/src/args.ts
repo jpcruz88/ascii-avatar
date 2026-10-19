@@ -11,6 +11,13 @@ export function isModo(value: unknown): value is (typeof MODOS)[number] {
   return typeof value === 'string' && (MODOS as readonly string[]).includes(value);
 }
 
+/** Estilos de `avatar create --estilo`. Se repite aquí (es `AGENT_STYLES` de core) por la misma razón. */
+export const ESTILOS = ['grabado', 'foto'] as const;
+
+export function isEstilo(value: unknown): value is (typeof ESTILOS)[number] {
+  return typeof value === 'string' && (ESTILOS as readonly string[]).includes(value);
+}
+
 /** Banderas que llevan un valor; las demás son interruptores. */
 export const VALUE_FLAGS: ReadonlySet<string> = new Set(['foto', 'caras', 'poses', 'clips', 'agente', 'cols', 'modo', 'settings', 'voz', 'estilo', 'liveportrait']);
 
@@ -47,7 +54,7 @@ export function parseArgs(argv: readonly string[], valueFlags: ReadonlySet<strin
 
 /** Banderas válidas de cada subcomando. */
 const ALLOWED_FLAGS: Readonly<Record<string, readonly string[]>> = {
-  create: ['foto', 'caras', 'poses', 'clips'],
+  create: ['foto', 'caras', 'poses', 'clips', 'estilo', 'sin-poses'],
   panel: ['agente', 'cols', 'modo'],
   voice: [],
   voz: ['voz', 'estilo'],

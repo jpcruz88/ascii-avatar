@@ -17,9 +17,16 @@ export interface Photo {
 /**
  * Normaliza cualquier imagen (JPEG, WebP, PNG…) a un PNG real. Es el punto que garantiza el contrato
  * "las caras son PNG": Gemini devuelve JPEG y `saveFace` solo acepta PNG. Lanza si no es una imagen.
+ *
+ * Con `size`, la deja además en ese lienzo (sin deformarla: centrada y con relleno de papel blanco).
+ * Sirve para que caras y poses midan lo mismo que el grabado base; el panel descarta las que no.
  */
-export async function toPng(buf: Buffer): Promise<Buffer> {
-  return sharp(buf).png().toBuffer();
+export async function toPng(buf: Buffer, size?: { width: number; height: number }): Promise<Buffer> {
+  const image = sharp(buf);
+  if (size !== undefined) {
+    image.resize(size.width, size.height, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 1 } });
+  }
+  return image.png().toBuffer();
 }
 
 /** Error esperado: su mensaje ya está en español y es seguro mostrarlo tal cual. */

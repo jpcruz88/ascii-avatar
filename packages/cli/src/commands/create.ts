@@ -1,34 +1,45 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BudgetExceededError,
   CREATION_CAP_USD,
   DEFAULT_MXN_PER_USD,
   FACE_IDS,
+  POSE_IDS,
   assertWithinCap,
   createAgent,
   decodeImage,
   formatMxn,
   frameToAnsi,
   imageToAscii,
+  listPoses,
   loadAgent,
   missingFaces,
   saveFace,
+  savePose,
   validateAgentName,
+  type AgentStyle,
   type AsciiMode,
   type FaceId,
   type Ledger,
+  type PoseId,
 } from '@ascii-avatar/core';
 import {
+  ENGRAVING_BASE_PROMPT,
+  ENGRAVING_FACE_PROMPTS,
   ESTIMATED_FACE_COST_USD,
+  FACE_PROMPTS,
   ImageRefusedError,
+  POSE_PROMPTS,
   PROMPTS_VERSION,
   estimateCreationCostUsd,
-  generateFace,
+  generateImage,
+  type EngravingFaceId,
   type ImageClient,
+  type ImageEditInput,
 } from '@ascii-avatar/gemini';
 import { loadConfig, saveConfig } from '../config.js';
-import { ImageInputError, readPhoto, toPng, type Photo } from '../image-input.js';
+import { ImageInputError, readPhoto, readSize, toPng, type Photo } from '../image-input.js';
 
 export interface CreateDeps {
   root: string;
@@ -45,6 +56,13 @@ export interface CreateDeps {
   cols: number;
   /** Tipo de cambio para mostrar los montos en pesos. Por defecto `DEFAULT_MXN_PER_USD`. */
   mxnPorUsd?: number;
+  /**
+   * Estilo pedido con `--estilo`. Sin indicarlo: el que tenga guardado el agente o, si es nuevo,
+   * `grabado`. Un agente viejo sin estilo guardado cuenta como `foto`.
+   */
+  style?: AgentStyle;
+  /** Solo estilo `grabado`: generar también las 8 poses. Por defecto sí; `--sin-poses` lo apaga. */
+  poses?: boolean;
 }
 
 export interface CreateResult {
@@ -80,6 +98,15 @@ function safeMessage(error: unknown): string {
   return AUTH_FAILURE.test(raw.split('\n')[0] ?? '') ? `${short.replace(/\.$/, '')}. ${KEY_HINT}` : short;
 }
 
+/** "1 grabado base + 7 caras + 8 poses": lo que falta generar en el estilo grabado. */
+function grabadoParts(needBase: boolean, faces: number, poses: number): string {
+  const parts: string[] = [];
+  if (needBase) parts.push('1 grabado base');
+  if (faces > 0) parts.push(`${faces} ${faces === 1 ? 'cara' : 'caras'}`);
+  if (poses > 0) parts.push(`${poses} ${poses === 1 ? 'pose' : 'poses'}`);
+  return parts.join(' + ');
+}
+
 export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
   const { root, name, imageClient, ledger, ask, out } = deps;
   const cap = deps.cap ?? CREATION_CAP_USD;
@@ -87,9 +114,19 @@ export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
   /** Los montos se manejan en USD; al usuario se le muestran siempre en pesos. */
   const mxn = (usd: number): string => formatMxn(usd, rate);
   const agentDir = join(root, 'agents', name);
+  let style: AgentStyle = deps.style ?? 'grabado';
+  let withPoses = false;
   const manualHint = (): string =>
-    `Gemini rechazó editar la foto (probable filtro de contenido). Puedes aportar tus propias 8 imágenes PNG, ` +
+    (style === 'grabado'
+      ? 'Gemini rechazó generar una imagen (probable filtro de contenido). Lo ya generado quedó guardado. '
+      : 'Gemini rechazó editar la foto (probable filtro de contenido). ') +
+    `Puedes aportar tus propias 8 imágenes PNG, ` +
     `con estos nombres: ${FACE_IDS.join(', ')}. Ponlas en una carpeta y corre: avatar create ${name} --caras <carpeta>`;
+  const missingPoses = (): PoseId[] => {
+    if (!withPoses) return [];
+    const have = new Set(existsSync(agentDir) ? listPoses(root, name) : []);
+    return POSE_IDS.filter((id) => !have.has(id));
+  };
 
   try {
     validateAgentName(name);
@@ -98,10 +135,23 @@ export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
     let photo: Photo | undefined;
 
     if (exists) {
-      loadAgent(root, name);
+      const stored = loadAgent(root, name).style ?? 'foto';
+      if (deps.style !== undefined && deps.style !== stored) {
+        throw new CreateFailure(
+          `El agente "${name}" se creó con el estilo ${stored} y no se puede cambiar a ${deps.style}. ` +
+            `Usa otro nombre para empezar con el estilo nuevo, o borra la carpeta ${agentDir} para empezar de cero. ` +
+            'No se gastó nada.',
+        );
+      }
+      style = stored;
+    }
+    withPoses = style === 'grabado' && deps.poses !== false;
+
+    if (exists) {
       missing = missingFaces(root, name);
-      if (missing.length === 0) {
-        return { status: 'done', message: `El agente "${name}" ya tiene las ${FACE_IDS.length} caras. No hay nada que generar.` };
+      if (missing.length === 0 && missingPoses().length === 0) {
+        const what = withPoses ? `sus ${FACE_IDS.length} caras y ${POSE_IDS.length} poses` : `las ${FACE_IDS.length} caras`;
+        return { status: 'done', message: `El agente "${name}" ya tiene ${what}. No hay nada que generar.` };
       }
       photo = await readPhoto(storedPhotoPath(root, name));
       if (deps.photoPath !== undefined) {
@@ -122,38 +172,100 @@ export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
       photo = await readPhoto(deps.photoPath);
     }
 
+    /** Una llamada de pago: tope antes, y guardar y registrar el costo justo después. */
+    const pay = async (
+      done: string,
+      input: ImageEditInput,
+      save: (png: Buffer) => void,
+      size?: { width: number; height: number },
+    ): Promise<Buffer> => {
+      assertWithinCap(ledger.spentCreation(name), ESTIMATED_FACE_COST_USD, cap, rate);
+      const { image, costUsd, costEstimated } = await generateImage(imageClient, input);
+      let png: Buffer;
+      try {
+        png = await toPng(image, size); // Gemini devuelve JPEG; todo se guarda siempre como PNG real
+        save(png);
+      } finally {
+        ledger.record('create', name, costUsd); // lo cobrado se registra aunque falle la conversión o el guardado
+      }
+      out(`${done} (${mxn(costUsd)}${costEstimated ? ' (estimado)' : ''})`);
+      return png;
+    };
+    const preview = async (png: Buffer, mode: AsciiMode): Promise<void> => {
+      try {
+        out(frameToAnsi(imageToAscii(await decodeImage(png), { cols: deps.cols, mode })));
+      } catch {
+        out('(no se pudo mostrar la vista previa)');
+      }
+    };
+
+    if (style === 'grabado') {
+      const needBase = missing.includes('neutral');
+      const faces = missing.filter((id): id is EngravingFaceId => id !== 'neutral');
+      const poses = missingPoses();
+      const total = (needBase ? 1 : 0) + faces.length + poses.length;
+      out(`Estilo grabado: ${grabadoParts(needBase, faces.length, poses.length)} (${total} imágenes).`);
+      out(`Estimado: ${mxn(estimateCreationCostUsd(total))} (tope ${mxn(cap)})`);
+      out(`Ya gastado en este agente: ${mxn(ledger.spentCreation(name))}`);
+      if (!(await ask('¿Generar las imágenes? (s/N)'))) {
+        return { status: 'declined', message: 'Cancelado: no se gastó nada.' };
+      }
+      if (!exists) createAgent(root, name, photo.buf, { promptsVersion: PROMPTS_VERSION, style: 'grabado' });
+
+      if (needBase) {
+        const png = await pay(
+          'Grabado base listo',
+          { prompt: ENGRAVING_BASE_PROMPT, image: photo.buf, mimeType: photo.mimeType },
+          (p) => saveFace(root, name, 'neutral', p),
+        );
+        await preview(png, 'grabado');
+        const left = total - 1;
+        if (left > 0 && !(await ask('¿Se parece? ¿Seguimos? (s/N)'))) {
+          return {
+            status: 'declined',
+            message: `Te quedaste con el grabado base (ya cobrado). Faltan ${left} imágenes; vuelve a correr el comando para continuar.`,
+          };
+        }
+      }
+
+      // Las caras y las poses salen de editar el grabado base, no la foto: así conservan el estilo.
+      const base = readFileSync(join(agentDir, 'faces', 'neutral.png'));
+      const size = await readSize(base, 'el grabado base');
+      const fromBase = (prompt: string): ImageEditInput => ({ prompt, image: base, mimeType: 'image/png' });
+      for (const id of faces) {
+        await pay(`Cara ${id} lista`, fromBase(ENGRAVING_FACE_PROMPTS[id]), (p) => saveFace(root, name, id, p), size);
+      }
+      for (const id of poses) {
+        await pay(`Pose ${id} lista`, fromBase(POSE_PROMPTS[id]), (p) => savePose(root, name, id, p), size);
+      }
+
+      const left = [...missingFaces(root, name), ...missingPoses()];
+      if (left.length > 0) throw new CreateFailure(`Faltan imágenes tras la generación: ${left.join(', ')}.`);
+      activateIfNone(root, name);
+      const what = withPoses ? `sus ${FACE_IDS.length} caras y ${POSE_IDS.length} poses` : `sus ${FACE_IDS.length} caras (sin poses)`;
+      return {
+        status: 'done',
+        message:
+          `Listo: el agente "${name}" tiene ${what} en estilo grabado. ` +
+          `Gasto total en creación: ${mxn(ledger.spentCreation(name))}.\n` +
+          `Para que se mueva con suavidad (clips de movimiento), corre: avatar movimientos ${name}`,
+      };
+    }
+
     out(`Estimado: ${mxn(estimateCreationCostUsd(missing.length))} (tope ${mxn(cap)})`);
     out(`Ya gastado en este agente: ${mxn(ledger.spentCreation(name))}`);
     if (!(await ask('¿Generar las caras? (s/N)'))) {
       return { status: 'declined', message: 'Cancelado: no se gastó nada.' };
     }
 
-    if (!exists) createAgent(root, name, photo.buf, { promptsVersion: PROMPTS_VERSION });
-    const photoBuf = photo.buf;
-    const mimeType = photo.mimeType;
-
-    /** Una llamada de pago: tope antes, y guardar y registrar el costo justo después. */
-    const generate = async (id: FaceId): Promise<Buffer> => {
-      assertWithinCap(ledger.spentCreation(name), ESTIMATED_FACE_COST_USD, cap, rate);
-      const { image, costUsd, costEstimated } = await generateFace(imageClient, photoBuf, mimeType, id);
-      let png: Buffer;
-      try {
-        png = await toPng(image); // Gemini devuelve JPEG; las caras se guardan siempre como PNG real
-        saveFace(root, name, id, png);
-      } finally {
-        ledger.record('create', name, costUsd); // lo cobrado se registra aunque falle la conversión o el guardado
-      }
-      out(`Cara ${id} lista (${mxn(costUsd)}${costEstimated ? ' (estimado)' : ''})`);
-      return png;
-    };
+    if (!exists) createAgent(root, name, photo.buf, { promptsVersion: PROMPTS_VERSION, style: 'foto' });
+    const fromPhoto = (id: FaceId): ImageEditInput => ({ prompt: FACE_PROMPTS[id], image: photo.buf, mimeType: photo.mimeType });
+    const generate = (id: FaceId): Promise<Buffer> =>
+      pay(`Cara ${id} lista`, fromPhoto(id), (p) => saveFace(root, name, id, p));
 
     if (missing.includes(PREVIEW_FACE)) {
       const png = await generate(PREVIEW_FACE);
-      try {
-        out(frameToAnsi(imageToAscii(await decodeImage(png), { cols: deps.cols, mode: deps.mode })));
-      } catch {
-        out('(no se pudo mostrar la vista previa)');
-      }
+      await preview(png, deps.mode);
       missing = missing.filter((id) => id !== PREVIEW_FACE);
       if (missing.length > 0 && !(await ask('¿Seguimos con las demás caras? (s/N)'))) {
         return {
@@ -167,27 +279,44 @@ export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
 
     const left = missingFaces(root, name);
     if (left.length > 0) throw new CreateFailure(`Faltan caras tras la generación: ${left.join(', ')}.`);
-    const config = loadConfig(root);
-    if (config.activeAgent === null) saveConfig(root, { ...config, activeAgent: name });
+    activateIfNone(root, name);
     return {
       status: 'done',
       message: `Listo: el agente "${name}" tiene sus ${FACE_IDS.length} caras. Gasto total en creación: ${mxn(ledger.spentCreation(name))}.`,
     };
   } catch (error) {
     if (error instanceof BudgetExceededError) {
-      const left = missingFaces(root, name);
+      const faces = missingFaces(root, name);
+      if (style === 'grabado') {
+        const poses = missingPoses();
+        const left = [
+          ...(faces.length > 0 ? [`caras: ${faces.join(', ')}`] : []),
+          ...(poses.length > 0 ? [`poses: ${poses.join(', ')}`] : []),
+        ];
+        return {
+          status: 'capped',
+          message: `Se alcanzó el tope de creación (${mxn(cap)}). Lo ya generado queda guardado; faltan ${left.join('; ')}.`,
+        };
+      }
       return {
         status: 'capped',
         message:
           `Se alcanzó el tope de creación (${mxn(cap)}). Las caras ya generadas quedan guardadas; ` +
-          `faltan: ${left.join(', ')}.`,
+          `faltan: ${faces.join(', ')}.`,
       };
     }
     if (error instanceof ImageRefusedError) return { status: 'failed', message: manualHint() };
     if (error instanceof ImageInputError) return { status: 'failed', message: error.message };
+    const what = style === 'grabado' ? 'las imágenes' : 'las caras';
     return {
       status: 'failed',
-      message: `No se pudo completar la creación: ${safeMessage(error).replace(/\.$/, '')}. Lo ya generado quedó guardado; al volver a correr solo se generan las caras que faltan.`,
+      message: `No se pudo completar la creación: ${safeMessage(error).replace(/\.$/, '')}. Lo ya generado quedó guardado; al volver a correr solo se generan ${what} que faltan.`,
     };
   }
+}
+
+/** Si no hay agente activo, deja este como activo. */
+function activateIfNone(root: string, name: string): void {
+  const config = loadConfig(root);
+  if (config.activeAgent === null) saveConfig(root, { ...config, activeAgent: name });
 }
