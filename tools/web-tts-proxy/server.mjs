@@ -21,11 +21,14 @@ import {
   loadApiKey,
 } from '@ascii-avatar/core';
 import {
+  FALLBACK_SPEECH_COST_USD,
   SpeechRefusedError,
   SpeechTimeoutError,
+  TTS_RATES,
   createGeminiTtsClient,
   loadGeminiConfig,
   synthesizeSpeech,
+  ttsCostUsd,
 } from '@ascii-avatar/gemini';
 
 export const DEFAULT_PORT = 8787;
@@ -87,6 +90,21 @@ export function dailyLimitUsd(root) {
  */
 export function defaultWebLimitUsd(root) {
   return dailyLimitUsd(root) / 2;
+}
+
+/** Caracteres por segundo de habla que se suponen al estimar: lento a propósito (más audio, más caro). */
+const ESTIMATE_CHARS_PER_SECOND = 10;
+
+/**
+ * Costo estimado, conservador, de una síntesis que se abandonó después de enviarla a Gemini (el
+ * cliente se fue o venció el tiempo): Google puede cobrarla igual. Supone habla lenta para el
+ * audio y ~4 caracteres por token para el texto, con las tarifas de voz, y nunca menos de
+ * `FALLBACK_SPEECH_COST_USD`.
+ */
+export function estimateAbandonedSpeechCostUsd(text) {
+  const seconds = text.length / ESTIMATE_CHARS_PER_SECOND;
+  const cost = ttsCostUsd(Math.ceil(text.length / 4), seconds * TTS_RATES.audioTokensPerSecond);
+  return Number.isFinite(cost) ? Math.max(FALLBACK_SPEECH_COST_USD, cost) : FALLBACK_SPEECH_COST_USD;
 }
 
 /**
@@ -201,6 +219,20 @@ export function createTtsProxy(opts) {
     return { text, voice, agent, ...(typeof style === 'string' && style.trim() !== '' ? { style } : {}) };
   };
 
+  /**
+   * Anota el estimado de una síntesis abandonada después de enviarla (cuenta para los topes, así
+   * desconectarse una y otra vez no permite gastar sin límite). Si no se puede anotar, bloquea.
+   */
+  const recordEstimate = (input) => {
+    const usd = estimateAbandonedSpeechCostUsd(input.text);
+    try {
+      ledger.record('voice', `${input.agent}${WEB_SUFFIX}`, usd);
+    } catch {
+      blocked = true;
+    }
+    return mxn(usd);
+  };
+
   /** Una síntesis: llave, topes diarios, Gemini y registro de gasto. */
   const synthesize = async (req, res, input, abort) => {
     if (abort.signal.aborted) return note(req, 499, ' el cliente se fue antes de sintetizar');
@@ -227,8 +259,12 @@ export function createTtsProxy(opts) {
       result = await synthesizeSpeech(client, input.text, input.voice, input.style, abort.signal);
     } catch (error) {
       // El mensaje de Gemini no se reenvía ni se anota: podría traer datos de la petición o la llave.
-      if (abort.signal.aborted) return note(req, 499, ' el cliente se fue; síntesis cancelada');
-      if (error instanceof SpeechTimeoutError) return reply(req, res, 504, 'Gemini no respondió a tiempo; sin voz esta vez.', ' tiempo agotado');
+      // La petición ya salió hacia Gemini: si se corta o vence el tiempo, se anota un estimado.
+      if (abort.signal.aborted) return note(req, 499, ` el cliente se fue; síntesis cancelada, ${recordEstimate(input)} estimados`);
+      if (error instanceof SpeechTimeoutError) {
+        const estimate = recordEstimate(input);
+        return reply(req, res, 504, 'Gemini no respondió a tiempo; sin voz esta vez.', ` tiempo agotado, ${estimate} estimados`);
+      }
       return error instanceof SpeechRefusedError
         ? reply(req, res, 502, 'Gemini rechazó el texto; sin voz esta vez.', ' rechazado')
         : reply(req, res, 502, 'Voz no disponible: falló la síntesis.', ' falló la síntesis');
@@ -279,12 +315,28 @@ export function createTtsProxy(opts) {
           if (pending >= maxPending) return reply(req, res, 429, 'El servidor de voz está ocupado; prueba en un momento.', ' cola llena');
           // Si el cliente cierra la conexión antes de recibir la respuesta, ya nadie espera la voz:
           // no se llama a Gemini o se cancela la síntesis en curso.
+          // Si se va mientras espera en la cola, su lugar se libera en el acto (al llegarle el turno
+          // se salta sin llamar a Gemini).
           const abort = new AbortController();
+          let started = false;
+          let released = false;
+          const release = () => {
+            if (released) return;
+            released = true;
+            pending--;
+          };
           res.on('close', () => {
-            if (!res.writableEnded) abort.abort();
+            if (res.writableEnded) return;
+            abort.abort();
+            if (!started) release();
           });
           pending++;
-          const run = queue.then(() => synthesize(req, res, input, abort)).finally(() => pending--);
+          const run = queue
+            .then(() => {
+              started = true;
+              return synthesize(req, res, input, abort);
+            })
+            .finally(release);
           queue = run.catch(() => undefined);
           return run;
         },

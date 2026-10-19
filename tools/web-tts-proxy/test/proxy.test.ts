@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SpeechTimeoutError } from '@ascii-avatar/gemini';
-import { createTtsProxy, dailyLimitUsd, defaultWebLimitUsd } from '../server.mjs';
+import { FALLBACK_SPEECH_COST_USD } from '@ascii-avatar/gemini';
+import { createTtsProxy, dailyLimitUsd, defaultWebLimitUsd, estimateAbandonedSpeechCostUsd } from '../server.mjs';
 
 const ORIGIN = 'http://localhost:8080';
 const KEY = 'AIzaFAKE-llave-del-proxy-0123456789';
@@ -338,7 +339,7 @@ describe('proxy de voz: no paga lo que nadie espera', () => {
     expect(ledgerLines()).toHaveLength(1);
   });
 
-  it('si el cliente se va mientras Gemini trabaja, cancela la síntesis y no anota gasto', async () => {
+  it('si el cliente se va mientras Gemini trabaja, cancela la síntesis y anota un estimado (Google puede cobrarla)', async () => {
     const h = hanging();
     const base = await start({ createClient: h.createClient });
     const abort = new AbortController();
@@ -352,7 +353,11 @@ describe('proxy de voz: no paga lo que nadie espera', () => {
     abort.abort();
     await req;
     await until(() => h.signals[0]!.aborted);
-    expect(ledgerLines()).toEqual([]);
+    await until(() => ledgerLines().length === 1);
+    const [line] = ledgerLines().map((l) => JSON.parse(l));
+    expect(line).toMatchObject({ kind: 'voice', agent: 'web@web' });
+    expect(line.usd).toBeCloseTo(estimateAbandonedSpeechCostUsd('Uno.'), 12);
+    expect(line.usd).toBeGreaterThanOrEqual(FALLBACK_SPEECH_COST_USD);
   });
 
   it('como mucho 3 peticiones pendientes; la cuarta recibe 429', async () => {
@@ -370,7 +375,7 @@ describe('proxy de voz: no paga lo que nadie espera', () => {
     expect((await Promise.all(pending)).map((r) => r.status)).toEqual([200, 200, 200]);
   });
 
-  it('si Gemini no responde a tiempo, responde 504 y no anota gasto', async () => {
+  it('si Gemini no responde a tiempo, responde 504 y anota un estimado que cuenta para los topes', async () => {
     const base = await start({
       createClient: () => ({
         async speak() {
@@ -378,8 +383,68 @@ describe('proxy de voz: no paga lo que nadie espera', () => {
         },
       }),
     });
-    const res = await post(base, { text: 'Hola.', voice: 'Kore' });
+    const res = await post(base, { text: 'Hola.', voice: 'Kore', agent: 'ana' });
     expect(res.status).toBe(504);
-    expect(ledgerLines()).toEqual([]);
+    const lines = ledgerLines().map((l) => JSON.parse(l));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ kind: 'voice', agent: 'ana@web' });
+    expect(lines[0].usd).toBeGreaterThanOrEqual(FALLBACK_SPEECH_COST_USD);
+  });
+
+  it('el estimado crece con el texto y nunca baja del costo mínimo', () => {
+    expect(estimateAbandonedSpeechCostUsd('')).toBe(FALLBACK_SPEECH_COST_USD);
+    expect(estimateAbandonedSpeechCostUsd('x'.repeat(500))).toBeGreaterThan(estimateAbandonedSpeechCostUsd('x'.repeat(100)));
+  });
+
+  it('desconectarse una y otra vez sí mueve el tope: deja de llamar a Gemini', async () => {
+    const h = hanging();
+    const base = await start({ createClient: h.createClient, webDailyLimitUsd: FALLBACK_SPEECH_COST_USD * 1.5 });
+    for (let i = 0; i < 3; i++) {
+      const abort = new AbortController();
+      const req = fetch(`${base}/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
+        body: JSON.stringify({ text: 'Hola.', voice: 'Kore' }),
+        signal: abort.signal,
+      }).catch(() => 'abortada');
+      await new Promise((r) => setTimeout(r, 30));
+      abort.abort();
+      await req;
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    // Las dos primeras llegaron a Gemini y se anotaron; la tercera ya choca con el tope.
+    expect(calls).toHaveLength(2);
+    expect(ledgerLines()).toHaveLength(2);
+  });
+
+  it('una petición abandonada en la cola libera su lugar en el acto', async () => {
+    const h = hanging();
+    const base = await start({ createClient: h.createClient });
+    const first = post(base, { text: 'Uno.', voice: 'Kore' });
+    await until(() => calls.length === 1);
+    const aborts = [new AbortController(), new AbortController()];
+    const queued = aborts.map((a, i) =>
+      fetch(`${base}/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
+        body: JSON.stringify({ text: `Cola ${i}.`, voice: 'Kore' }),
+        signal: a.signal,
+      }).catch(() => 'abortada'),
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    for (const a of aborts) a.abort();
+    await Promise.all(queued);
+    await new Promise((r) => setTimeout(r, 30));
+    // Con la primera aún en curso, caben otras dos: las abandonadas ya no ocupan lugar.
+    const more = [post(base, { text: 'Dos.', voice: 'Kore' }), post(base, { text: 'Tres.', voice: 'Kore' })];
+    await new Promise((r) => setTimeout(r, 30));
+    h.releases[0]!();
+    for (let i = 1; i < 3; i++) {
+      await until(() => h.releases.length > i);
+      h.releases[i]!();
+    }
+    expect((await first).status).toBe(200);
+    expect((await Promise.all(more)).map((r) => r.status)).toEqual([200, 200]);
+    expect(calls.map((c) => c.text)).toEqual(['Uno.', 'Dos.', 'Tres.']);
   });
 });
