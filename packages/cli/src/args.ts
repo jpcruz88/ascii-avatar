@@ -19,7 +19,7 @@ export function isEstilo(value: unknown): value is (typeof ESTILOS)[number] {
 }
 
 /** Banderas que llevan un valor; las demás son interruptores. */
-export const VALUE_FLAGS: ReadonlySet<string> = new Set(['foto', 'caras', 'poses', 'clips', 'agente', 'cols', 'modo', 'settings', 'voz', 'estilo', 'liveportrait']);
+export const VALUE_FLAGS: ReadonlySet<string> = new Set(['foto', 'caras', 'poses', 'clips', 'agente', 'cols', 'modo', 'settings', 'voz', 'estilo', 'liveportrait', 'out']);
 
 /** Separa `argv` (sin `node` ni el script) en comando, posicionales y banderas. Lanza si falta un valor. */
 export function parseArgs(argv: readonly string[], valueFlags: ReadonlySet<string> = VALUE_FLAGS): ParsedArgs {
@@ -61,6 +61,7 @@ const ALLOWED_FLAGS: Readonly<Record<string, readonly string[]>> = {
   'install-hook': ['uninstall', 'settings'],
   movimientos: ['liveportrait', 'clips'],
   help: [],
+  'exportar-web': ['out', 'cols'],
 };
 
 /** Banderas de `flags` que el subcomando `cmd` no conoce. */

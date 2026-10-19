@@ -31,6 +31,9 @@ Uso:
                                            LivePortrait (gratis; se instala aparte, ver el README)
   avatar install-hook [--uninstall] [--settings <ruta>]
                                            Conecta (o desconecta) el avatar con Claude Code
+  avatar exportar-web <nombre> [--out <carpeta>] [--cols <n>]
+                                           Exporta el agente para la web (<ascii-avatar>): cuadros ya
+                                           convertidos, sin foto ni llave
   avatar help                              Muestra esta ayuda
 `;
 
@@ -269,6 +272,28 @@ async function movimientos(args: ParsedArgs, root: string): Promise<number> {
   }
 }
 
+/** `avatar exportar-web <nombre> [--out <carpeta>] [--cols <n>]`: paquete para `<ascii-avatar>`. */
+async function exportarWeb(args: ParsedArgs, root: string): Promise<number> {
+  const [name] = args.positionals;
+  const { out, cols } = args.flags;
+  if (name === undefined) return fail('Uso: avatar exportar-web <nombre> [--out <carpeta>] [--cols <n>]');
+  if (out === true || cols === true) return fail('Faltan valores en las opciones.');
+  if (cols !== undefined && !/^\d+$/.test(cols)) return fail('--cols debe ser un número entero entre 20 y 500.');
+  try {
+    const { runExportWeb } = await import('./commands/exportar-web.js');
+    const r = await runExportWeb({
+      root,
+      name,
+      ...(out === undefined ? {} : { out }),
+      ...(cols === undefined ? {} : { cols: Number(cols) }),
+    });
+    (r.status === 'ok' ? console.log : console.error)(r.message);
+    return r.status === 'ok' ? 0 : 1;
+  } catch (error) {
+    return fail(error instanceof Error ? (error.message.split('\n')[0] ?? 'Error.') : 'Error.');
+  }
+}
+
 async function main(argv: string[]): Promise<number> {
   const root = defaultRoot();
   let args: ParsedArgs;
@@ -279,7 +304,7 @@ async function main(argv: string[]): Promise<number> {
   }
   if (args.cmd !== undefined) {
     const unknown = unknownFlags(args.cmd, args.flags);
-    if (unknown.length > 0 && ['create', 'panel', 'voice', 'voz', 'install-hook', 'movimientos', 'help'].includes(args.cmd)) {
+    if (unknown.length > 0 && ['create', 'panel', 'voice', 'voz', 'install-hook', 'movimientos', 'help', 'exportar-web'].includes(args.cmd)) {
       return fail(`Opción desconocida: ${unknown.map((f) => `--${f}`).join(', ')}\n\n${HELP}`);
     }
   }
@@ -308,6 +333,8 @@ async function main(argv: string[]): Promise<number> {
       return installHookCmd(args);
     case 'movimientos':
       return movimientos(args, root);
+    case 'exportar-web':
+      return exportarWeb(args, root);
     default:
       return fail(`Comando desconocido: ${args.cmd}\n\n${HELP}`);
   }

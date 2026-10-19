@@ -60,3 +60,12 @@ export { spokenSummary } from './text/summary.js';
 export { pickExpression } from './text/expression.js';
 export { Animator, CLIP_FPS, MOUTH_ANTICIPATION_MS, SPEECH_LEAD_IN_MS } from './anim/animator.js';
 export type { AnimatorOptions, SayOptions } from './anim/animator.js';
+export {
+  InvalidWebExportError,
+  WEB_EXPORT_FORMAT,
+  WEB_EXPORT_VERSION,
+  checkWebManifest,
+  parseWebExport,
+  webExportFramesText,
+} from './web-export.js';
+export type { WebManifest } from './web-export.js';
