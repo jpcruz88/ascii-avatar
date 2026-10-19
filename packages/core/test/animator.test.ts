@@ -686,7 +686,7 @@ describe('Animator: interrumpir un gesto no hace saltar la cabeza', () => {
     expect(frames.slice(0, 3)).toEqual(['pose:look_left', 'ease:look_left', 'neutral']);
   });
 
-  it('una pose con su clip se suelta por el clip, desde la mitad hacia el cuadro 0', () => {
+  it('una pose se suelta siempre por su cuadro ease:, aunque haya un clip del mismo gesto', () => {
     // La pose suave sale al pensar (sin clip think, se sostiene de inmediato).
     const b = new Animator({ rng: zero, motion: { poses: ['turn_right'], clips: { turn_right: 16 } } });
     b.thinking(0);
@@ -694,8 +694,20 @@ describe('Animator: interrumpir un gesto no hace saltar la cabeza', () => {
     b.say(100, speech(OPEN_THEN_CLOSED, 1200));
     const frames = trace(b, 100, 700, 'pose:turn_right');
     expectNoSnap(frames);
-    expect(frames[1]).toBe('clip:turn_right:8');
-    expect(frames).toContain('clip:turn_right:0');
+    expect(frames.slice(0, 3)).toEqual(['pose:turn_right', 'ease:turn_right', 'smile']);
+    expect(frames.some((f) => f.startsWith('clip:'))).toBe(false);
+  });
+
+  it('una segunda interrupción durante el ease: lo termina en vez de saltar', () => {
+    const a = new Animator({ rng: zero, motion: { poses: ['look_left'], clips: {} } });
+    expect(a.frame(4400)).toBe('pose:look_left');
+    a.say(4400, speech(OPEN_THEN_CLOSED, 1200, 'smile'));
+    expect(a.frame(4440)).toBe('ease:look_left');
+    a.say(4440, speech(OPEN_THEN_CLOSED, 1200, 'sad'));
+    // El ease empezado en 4400 dura 2 cuadros (~83 ms): sigue hasta 4483 y luego la expresión.
+    expect(a.frame(4441)).toBe('ease:look_left');
+    expect(a.frame(4483)).toBe('ease:look_left');
+    expect(a.frame(4484)).toBe('sad');
   });
 
   it('un say nuevo a mitad de un asentimiento del habla anterior tampoco salta', () => {

@@ -56,17 +56,12 @@ const FAST_LOOKAHEAD_MS = 100;
  * expresión (`SPEECH_LEAD_IN_MS`), así la boca empieza a su hora aunque se interrumpa un gesto.
  */
 const RETURN_MAX_MS = 480;
-/** Cuadros que dura el regreso de una pose sin clip (su cuadro `ease:`). */
+/**
+ * Cuadros que dura el regreso de una pose (su cuadro `ease:`). Las poses se sueltan siempre así,
+ * no por un clip del mismo gesto: poses y clips vienen de fuentes distintas y saltar de una pose a
+ * un cuadro del clip podría no casar.
+ */
 const EASE_FRAMES = 2;
-/** Clip con el que se suelta cada pose (de la mitad del clip hacia el cuadro 0), si el agente lo tiene. */
-const POSE_CLIP: Partial<Record<PoseId, ClipId>> = {
-  tilt_left: 'tilt_left',
-  tilt_right: 'tilt_right',
-  turn_left: 'turn_left',
-  turn_right: 'turn_right',
-  nod_up: 'nod',
-  nod_down: 'nod',
-};
 
 export interface AnimatorOptions {
   /** Fuente de números en [0, 1). Por defecto `Math.random`; en pruebas se inyecta una fija. */
@@ -152,8 +147,8 @@ const allFrames = (n: number): number[] => Array.from({ length: n }, (_, i) => i
  *   tramo de ida y vuelta de sus primeros cuadros, que termina en neutral.
  * - Si llega `say`, `thinking` o `idle` a mitad de un gesto, la cabeza no salta: un clip vuelve
  *   hacia su cuadro 0 (acelerado si hace falta, en a lo sumo 480 ms, dentro del avance de la
- *   expresión) y una pose se suelta por su clip (de la mitad hacia el 0) o por su cuadro `ease:`.
- *   Un `thinking` mientras ya piensa no reinicia nada.
+ *   expresión) y una pose se suelta por su cuadro `ease:` (una interrupción durante ese regreso
+ *   lo deja terminar). Un `thinking` mientras ya piensa no reinicia nada.
  * - Nunca parpadea durante un gesto (los cuadros de un clip ya traen sus ojos): un parpadeo que cae
  *   dentro se hace al terminar, y un gesto que empieza durante un parpadeo espera a que acabe.
  * - Los clips van a 24 cuadros por segundo; `fastFrames` avisa cuándo el panel debe dibujar rápido.
@@ -310,9 +305,9 @@ export class Animator {
   }
 
   /**
-   * Regreso a neutral si en `t` se ve un gesto: un clip vuelve desde su cuadro actual hasta el 0;
-   * una pose se suelta por su clip (de la mitad hacia el 0) o por su cuadro `ease:`. Dura a lo
-   * sumo `RETURN_MAX_MS` (se saltan cuadros si hace falta). `null` si no hace falta regresar.
+   * Regreso a neutral si en `t` se ve un gesto: un clip vuelve desde su cuadro actual hasta el 0
+   * (a lo sumo `RETURN_MAX_MS`, saltando cuadros si hace falta); una pose se suelta por su cuadro
+   * `ease:`, y si ya se estaba soltando, termina lo que le falta. `null` si no hace falta regresar.
    */
   private interruption(t: number): Active | null {
     const g = this.visibleGesture(t);
@@ -324,12 +319,10 @@ export class Animator {
       const n = at.seg.frames[at.index]!;
       if (n > 0) segment = { kind: 'clip', clip: at.seg.clip, frames: backTo0(n - 1) };
     } else if (at.seg.kind === 'pose') {
-      const clip = POSE_CLIP[at.seg.pose];
-      const count = clip === undefined ? 0 : (this.motion.clips[clip] ?? 0);
-      segment =
-        clip !== undefined && count >= 2
-          ? { kind: 'clip', clip, frames: backTo0(Math.floor(count / 2)) }
-          : { kind: 'ease', pose: at.seg.pose, ms: EASE_FRAMES * CLIP_FRAME_MS };
+      segment = { kind: 'ease', pose: at.seg.pose, ms: EASE_FRAMES * CLIP_FRAME_MS };
+    } else {
+      const left = at.startMs + at.seg.ms - t;
+      if (left > 0) segment = { kind: 'ease', pose: at.seg.pose, ms: left };
     }
     if (segment === null) return null;
     const gesture: Gesture = { key: 'return', segments: [segment] };
@@ -446,15 +439,15 @@ export class Animator {
     }
   }
 
-  /** Tramo del gesto que se ve en `t` y, si es un clip, la posición en su lista de cuadros. */
-  private locate(g: Active, t: number): { seg: Segment; index: number } | undefined {
+  /** Tramo del gesto que se ve en `t`, cuándo empezó y, si es un clip, la posición en su lista de cuadros. */
+  private locate(g: Active, t: number): { seg: Segment; index: number; startMs: number } | undefined {
     let from = g.atMs;
     for (const seg of g.gesture.segments) {
       const ms = segmentMs(seg);
       if (t < from + ms) {
         const index =
           seg.kind === 'clip' ? Math.min(seg.frames.length - 1, Math.max(0, Math.floor((t - from) / CLIP_FRAME_MS))) : 0;
-        return { seg, index };
+        return { seg, index, startMs: from };
       }
       from += ms;
     }
