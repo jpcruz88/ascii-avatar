@@ -1,6 +1,6 @@
 /** Lo mínimo del SDK que usamos; permite inyectar un falso en las pruebas. */
 export interface InteractionsApi {
-  interactions: { create(params: unknown): Promise<unknown> };
+  interactions: { create(params: unknown, options?: { signal?: AbortSignal; timeout_ms?: number }): Promise<unknown> };
 }
 
 /** Campos de una interacción que comparten el adaptador de imágenes y el de voz. */

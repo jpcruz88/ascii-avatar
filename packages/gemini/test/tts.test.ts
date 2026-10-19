@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   createGeminiTtsClient,
   DEFAULT_TTS_MODEL,
+  DEFAULT_TTS_TIMEOUT_MS,
+  SpeechTimeoutError,
   DEFAULT_VOICE,
   loadGeminiConfig,
   SpeechRefusedError,
@@ -313,4 +315,50 @@ describe('synthesizeSpeech', () => {
       expect(calls).toHaveLength(0);
     },
   );
+});
+
+describe('tiempo máximo y cancelación de la voz', () => {
+  const cfg = loadGeminiConfig({ GEMINI_API_KEY: 'llave-falsa' });
+  /** Una API que nunca responde (y si se le aborta la señal, tampoco: la ignora). */
+  function hangingApi(): { ai: InteractionsApi; options: unknown[] } {
+    const options: unknown[] = [];
+    const ai: InteractionsApi = {
+      interactions: {
+        create(_params, opts) {
+          options.push(opts);
+          return new Promise(() => undefined);
+        },
+      },
+    };
+    return { ai, options };
+  }
+
+  it('por defecto espera como mucho 25 s', () => {
+    expect(DEFAULT_TTS_TIMEOUT_MS).toBe(25_000);
+  });
+
+  it('pasa una señal de cancelación y el tiempo máximo al SDK', async () => {
+    const { ai, options } = hangingApi();
+    const p = createGeminiTtsClient(cfg, ai, { timeoutMs: 30 }).speak({ text: 'Hola', voice: 'Kore' });
+    await expect(p).rejects.toBeInstanceOf(SpeechTimeoutError);
+    expect(options[0]).toMatchObject({ timeout_ms: 30 });
+    expect((options[0] as { signal: AbortSignal }).signal).toBeInstanceOf(AbortSignal);
+    expect((options[0] as { signal: AbortSignal }).signal.aborted).toBe(true);
+  });
+
+  it('si Gemini no responde a tiempo, lanza SpeechTimeoutError aunque el SDK ignore la señal', async () => {
+    const { ai } = hangingApi();
+    const client = createGeminiTtsClient(cfg, ai, { timeoutMs: 20 });
+    await expect(synthesizeSpeech(client, 'Hola', 'Kore')).rejects.toThrow(SpeechTimeoutError);
+  });
+
+  it('quien la pidió puede cancelarla con su propia señal', async () => {
+    const { ai, options } = hangingApi();
+    const abort = new AbortController();
+    const client = createGeminiTtsClient(cfg, ai, { timeoutMs: 10_000 });
+    const p = synthesizeSpeech(client, 'Hola', 'Kore', undefined, abort.signal);
+    abort.abort();
+    await expect(p).rejects.toMatchObject({ name: 'AbortError' });
+    expect((options[0] as { signal: AbortSignal }).signal.aborted).toBe(true);
+  });
 });

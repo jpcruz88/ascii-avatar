@@ -15,6 +15,9 @@ export const DEFAULT_VOICE = 'Kore';
 /** Frecuencia de muestreo que se pide: la que espera el movimiento de boca. */
 export const TTS_SAMPLE_RATE = 24_000;
 
+/** Tiempo máximo de espera de una síntesis: pasado esto se abandona (sin audio no se registra gasto). */
+export const DEFAULT_TTS_TIMEOUT_MS = 25_000;
+
 /** Costo conservador cuando no hay tokens de uso ni se puede medir el WAV. */
 export const FALLBACK_SPEECH_COST_USD = 0.01;
 
@@ -23,6 +26,8 @@ export interface SpeechInput {
   voice: string;
   /** Cómo debe sonar la voz (texto libre). Vacío o ausente: Gemini usa su estilo por defecto. */
   style?: string;
+  /** Cancela la síntesis (por ejemplo, si ya nadie la va a oír). */
+  signal?: AbortSignal;
 }
 
 export interface SpeechResult {
@@ -49,6 +54,21 @@ export class SpeechRefusedError extends Error {
   }
 }
 
+/** Gemini no respondió dentro del tiempo máximo: no hay audio y no se cobra nada aquí. */
+export class SpeechTimeoutError extends Error {
+  constructor(readonly timeoutMs: number) {
+    super(`Gemini no respondió la voz en ${Math.round(timeoutMs / 1000)} s.`);
+    this.name = 'SpeechTimeoutError';
+  }
+}
+
+/** Error con el que se rechaza una síntesis cancelada por quien la pidió. */
+function abortError(): Error {
+  const error = new Error('Síntesis de voz cancelada.');
+  error.name = 'AbortError';
+  return error;
+}
+
 /** Costura para poder probar sin red: el panel usa `createGeminiTtsClient`. */
 export interface TtsClient {
   speak(input: SpeechInput): Promise<SpeechResult>;
@@ -61,19 +81,48 @@ interface SpeechInteraction extends InteractionResultBase {
 export function createGeminiTtsClient(
   cfg: GeminiConfig,
   ai: InteractionsApi = new GoogleGenAI({ apiKey: cfg.apiKey }),
+  opts: { timeoutMs?: number } = {},
 ): TtsClient {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TTS_TIMEOUT_MS;
   return {
-    async speak({ text, voice, style }) {
+    async speak({ text, voice, style, signal }) {
+      if (signal?.aborted) throw abortError();
       const annotations =
         style !== undefined && style.trim() !== ''
           ? { annotations: [{ type: 'speech_metadata', style }] }
           : {};
-      const result = (await ai.interactions.create({
-        model: cfg.ttsModel,
-        input: [{ type: 'user_input', content: [{ type: 'text', text, ...annotations }] }],
-        response_format: { type: 'audio', mime_type: 'audio/wav', sample_rate: TTS_SAMPLE_RATE },
-        generation_config: { speech_config: [{ voice }] },
-      })) as SpeechInteraction;
+      // Una sola señal para el SDK: se aborta al vencer el tiempo o si quien la pidió cancela. La
+      // carrera con el temporizador garantiza el tiempo máximo aunque el SDK ignorara la señal.
+      const abort = new AbortController();
+      let fail: (error: Error) => void = () => undefined;
+      const stopped = new Promise<never>((_resolve, reject) => (fail = reject));
+      const timer = setTimeout(() => {
+        abort.abort();
+        fail(new SpeechTimeoutError(timeoutMs));
+      }, timeoutMs);
+      const onCancel = (): void => {
+        abort.abort();
+        fail(abortError());
+      };
+      signal?.addEventListener('abort', onCancel, { once: true });
+      let result: SpeechInteraction;
+      try {
+        result = (await Promise.race([
+          ai.interactions.create(
+            {
+              model: cfg.ttsModel,
+              input: [{ type: 'user_input', content: [{ type: 'text', text, ...annotations }] }],
+              response_format: { type: 'audio', mime_type: 'audio/wav', sample_rate: TTS_SAMPLE_RATE },
+              generation_config: { speech_config: [{ voice }] },
+            },
+            { signal: abort.signal, timeout_ms: timeoutMs },
+          ),
+          stopped,
+        ])) as SpeechInteraction;
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onCancel);
+      }
 
       const data = result.output_audio?.data;
       const wav = data === undefined ? Buffer.alloc(0) : Buffer.from(data, 'base64');
@@ -126,11 +175,17 @@ export async function synthesizeSpeech(
   text: string,
   voice: string,
   style?: string,
+  signal?: AbortSignal,
 ): Promise<{ wav: Buffer; costUsd: number; costEstimated: boolean }> {
   if (text.trim() === '') {
     throw new Error('No hay texto que sintetizar: el texto está vacío.');
   }
-  const { wav, inputTokens, outputTokens } = await client.speak({ text, voice, ...(style === undefined ? {} : { style }) });
+  const { wav, inputTokens, outputTokens } = await client.speak({
+    text,
+    voice,
+    ...(style === undefined ? {} : { style }),
+    ...(signal === undefined ? {} : { signal }),
+  });
   if (inputTokens === null || outputTokens === null) {
     return { wav, costUsd: estimateSpeechCostUsd(wav, text), costEstimated: true };
   }
