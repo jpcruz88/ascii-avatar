@@ -1,6 +1,7 @@
 import {
   Animator,
   Ledger,
+  atlasMotion,
   loadAgent,
   loadApiKey,
   loadAtlas,
@@ -83,7 +84,8 @@ export async function runPanel(opts: PanelOptions): Promise<number> {
 
   // Reloj monótono que arranca cerca de 0: el animador se pone al día en bucle si recibe Date.now().
   const now = (): number => performance.now();
-  const animator = new Animator();
+  // Con poses o clips el avatar hace gestos; sin ellos, solo parpadea y habla como siempre.
+  const animator = new Animator({ motion: atlasMotion(atlas) });
   animator.idle(now());
   const controller = new PanelController({
     root,
@@ -114,6 +116,7 @@ export async function runPanel(opts: PanelOptions): Promise<number> {
       paper: mode === 'grabado',
       getFrame: () => atlas[animator.frame(now())] ?? atlas.neutral,
       speaking: () => animator.speaking(now()),
+      fast: () => animator.fastFrames(now()),
       voiceOn: () => controller.voiceOn(),
       spentToday: () => controller.spentToday(),
       notice: () => controller.notice(),

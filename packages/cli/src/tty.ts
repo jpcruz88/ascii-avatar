@@ -2,7 +2,7 @@ import { INK, PAPER, frameToAnsi, type AsciiFrame } from '@ascii-avatar/core';
 
 const MIN_COLS = 20;
 const MIN_ROWS = 10;
-/** Cuadros por segundo mientras el avatar habla (la boca se mueve) y en reposo. */
+/** Cuadros por segundo mientras el avatar habla o reproduce un clip, y en reposo. */
 export const FPS_SPEAKING = 24;
 export const FPS_IDLE = 12;
 /** Cada cuánto se relee el gasto del día (lee un archivo). */
@@ -19,7 +19,7 @@ const at = (row: number, col = 1): string => `\x1b[${row};${col}H`;
 
 export const TOO_SMALL = 'Terminal muy pequeña';
 
-/** Espera hasta el próximo cuadro: más corta al hablar, para que la boca se vea fluida. */
+/** Espera hasta el próximo cuadro: más corta al hablar o durante un clip, para que se vea fluido. */
 export function frameIntervalMs(speaking: boolean): number {
   return Math.round(1000 / (speaking ? FPS_SPEAKING : FPS_IDLE));
 }
@@ -103,6 +103,8 @@ export interface TtyOptions {
   getFrame(): AsciiFrame;
   /** Si el avatar está hablando: sube el ritmo de dibujo. Por defecto, no. */
   speaking?(): boolean;
+  /** Si se reproduce (o está por empezar) un clip de movimiento: también sube el ritmo. Por defecto, no. */
+  fast?(): boolean;
   voiceOn(): boolean;
   spentToday(): number;
   notice(): string | null;
@@ -116,7 +118,7 @@ function isGone(error: unknown): boolean {
 }
 
 /**
- * Bucle de pantalla alterna a ~24 cuadros por segundo al hablar y ~12 en reposo; solo escribe cuando
+ * Bucle de pantalla alterna a ~24 cuadros por segundo al hablar o durante un clip y ~12 en reposo; solo escribe cuando
  * cambia el cuadro o el pie (o tras un cambio de tamaño), así en reposo casi no gasta CPU. Resuelve al salir (`q`, Ctrl-C, señal);
  * la terminal siempre se restaura (cursor, pantalla alterna y modo crudo), también ante excepciones.
  * Si la terminal desaparece (EIO/EPIPE al escribir, p. ej. al cerrar la ventana) el panel termina
@@ -182,7 +184,8 @@ export function runTty(o: TtyOptions): Promise<void> {
       draw();
       if (restored) return;
       const now = performance.now();
-      nextAt = Math.max(nextAt + frameIntervalMs(o.speaking?.() ?? false), now);
+      const quick = (o.speaking?.() ?? false) || (o.fast?.() ?? false);
+      nextAt = Math.max(nextAt + frameIntervalMs(quick), now);
       timer = setTimeout(tick, Math.max(0, nextAt - now));
     };
 

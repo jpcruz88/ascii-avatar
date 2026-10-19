@@ -203,6 +203,25 @@ describe('ritmo de dibujo', () => {
     await done;
   });
 
+  it('mientras se reproduce un clip (fast) también dibuja a ~24 fps aunque no hable', async () => {
+    vi.useFakeTimers();
+    const stdout = new FakeStdout();
+    const stdin = new FakeStdin();
+    let clip = true;
+    let calls = 0;
+    const done = runTty({ ...options(stdout, stdin), speaking: () => false, fast: () => clip, getFrame: () => (++calls, frame) });
+    calls = 0;
+    vi.advanceTimersByTime(1000);
+    expect(calls).toBeGreaterThanOrEqual(23);
+    clip = false;
+    vi.advanceTimersByTime(100);
+    calls = 0;
+    vi.advanceTimersByTime(1000);
+    expect(calls).toBeLessThanOrEqual(13);
+    stdin.emit('data', Buffer.from('q'));
+    await done;
+  });
+
   it('en reposo baja a unas 12 veces por segundo', async () => {
     vi.useFakeTimers();
     const stdout = new FakeStdout();

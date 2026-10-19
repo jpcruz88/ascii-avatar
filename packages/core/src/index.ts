@@ -54,5 +54,5 @@ export { MOUTH_MIN_HOLD_MS, mouthTimeline, syntheticMouthTimeline } from './audi
 export type { MouthLevel, MouthStep } from './audio/mouth.js';
 export { spokenSummary } from './text/summary.js';
 export { pickExpression } from './text/expression.js';
-export { Animator, MOUTH_ANTICIPATION_MS, SPEECH_LEAD_IN_MS } from './anim/animator.js';
+export { Animator, CLIP_FPS, MOUTH_ANTICIPATION_MS, SPEECH_LEAD_IN_MS } from './anim/animator.js';
 export type { AnimatorOptions, SayOptions } from './anim/animator.js';
