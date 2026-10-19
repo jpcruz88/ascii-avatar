@@ -418,7 +418,7 @@ avatar exportar-web ana --out sitio/ana --cols 100
 
 La carpeta lleva solo `manifest.json` (nombre, voz, estilo de voz, columnas y filas, colores, lista de cuadros, poses y clips) y `frames.txt` (los cuadros ya convertidos a caracteres en modo grabado, tinta sobre papel). **Nunca lleva la foto original ni tu llave de Gemini.** Sí lleva la cara de la persona dibujada con caracteres, así que publícala solo con su permiso. `--cols` va de 20 a 500 (por defecto 120: la página escala la letra, así que conviene más definición que en el panel). Si la carpeta ya existe, solo se reescribe si es un paquete web anterior; si tiene otras cosas, el comando se detiene. Un agente con unos 120 cuadros (caras, poses y clips) a 120 columnas pesa alrededor de 1.2 MB (unos 100 KB comprimido con gzip, como lo sirven GitHub Pages y casi cualquier servidor).
 
-El repositorio ignora las carpetas `*-web/` para que no subas un agente real por accidente.
+El repositorio ignora las carpetas `*-web/` para que no subas un agente real por accidente. Una carpeta elegida con `--out` que no termine en `-web` (como `sitio/ana` del ejemplo) **no** queda cubierta: no la subas a un repositorio público si lleva la cara de una persona real.
 
 **2. Ponlo en la página.** Copia junto a tu página el archivo `packages/web/dist/ascii-avatar.js` (se genera con `npm run build`) y la carpeta exportada:
 
@@ -450,25 +450,31 @@ Igual que en el panel, dice un resumen corto del texto (sin código ni rutas) y 
 
 ```sh
 npm run build
-node tools/web-tts-proxy/server.mjs --origin http://localhost:8080
-# Proxy de voz en http://127.0.0.1:8787/tts para http://localhost:8080 · límite diario $5.52 MXN
+node tools/web-tts-proxy/server.mjs --origin http://localhost:8080 --limite-diario-mxn 2
+# Proxy de voz en http://127.0.0.1:8787/tts para http://localhost:8080 · tope diario de la web $2.00 MXN (límite total del día $5.52 MXN)
 ```
 
 ```html
 <ascii-avatar src="ana-web/" tts-url="http://localhost:8787/tts"></ascii-avatar>
 ```
 
-- Lee la llave de `GEMINI_API_KEY` o de `~/.ascii-avatar/secrets.json`; si no hay, responde con un mensaje que dice dónde ponerla.
-- Solo acepta peticiones de la página indicada en `--origin` (CORS restringido a ese origen; cualquier otro recibe 403). Escucha en `127.0.0.1` y el puerto 8787 por defecto (`--host`, `--port`, o `TTS_PROXY_ORIGIN`, `TTS_PROXY_HOST`, `TTS_PROXY_PORT`).
-- Limita el cuerpo (4 KB), el texto (500 caracteres) y las peticiones (20 por minuto por dirección).
-- Cada síntesis se anota en el mismo `~/.ascii-avatar/ledger.jsonl` que el panel y se hace cumplir el mismo límite diario de `config.json` (`limiteDiarioMxn` o `dailyLimitUsd`): el panel y la página comparten el gasto del día. Si no puede anotar un gasto, bloquea la voz hasta que lo reinicies.
-- Nunca escribe la llave ni el texto en su registro, y no reenvía los errores de Gemini.
+- Lee la llave de `GEMINI_API_KEY` o de `~/.ascii-avatar/secrets.json`; si no hay, responde con un mensaje que dice dónde ponerla. La llave nunca sale hacia la página.
+- Escucha en `127.0.0.1` y el puerto 8787 por defecto (`--host`, `--port`, o `TTS_PROXY_HOST`, `TTS_PROXY_PORT`). **Para uso local, déjalo en `127.0.0.1`**: así solo lo alcanzan los programas de tu propia máquina.
+- `--origin` (o `TTS_PROXY_ORIGIN`) restringe CORS a esa página: cualquier otro origen recibe 403. **Eso no es un control de acceso.** Solo impide que otras páginas lo usen desde el navegador de un visitante; fuera de un navegador cualquiera puede enviar la cabecera que quiera (por ejemplo `curl -H 'Origin: http://localhost:8080' …`) y la petición pasa y gasta. Lo único que de verdad frena el gasto son los topes diarios.
+- Dos topes diarios, los dos en el mismo `~/.ascii-avatar/ledger.jsonl` que el panel: el **límite total del día** de `config.json` (`limiteDiarioMxn` o `dailyLimitUsd`), que comparten panel y página, y un **tope propio de la web**, `--limite-diario-mxn` (o `TTS_PROXY_LIMITE_DIARIO_MXN`), contado solo sobre lo que gastó el proxy (se anota como `<agente>@web`). Sin `--limite-diario-mxn`, el tope de la web es la mitad del límite total, para que las visitas nunca dejen sin voz a tu panel. Ponle uno más bajo si la página es pública. Al llegar a cualquiera de los dos responde «Límite diario de voz alcanzado» (sin montos) y el avatar sigue con la boca sintética.
+- Limita el cuerpo (4 KB), el texto (500 caracteres), las peticiones (20 por minuto por dirección IP) y la cola (como mucho 3 síntesis pendientes; más, 429).
+- No paga lo que nadie espera: si la página corta la petición (otro `decir`, `callar` o se cierra), el proxy no llama a Gemini o cancela la síntesis en curso. Si Gemini no responde en 25 s, se abandona sin anotar gasto.
+- Si no puede anotar un gasto, bloquea la voz hasta que lo reinicies. Nunca escribe la llave ni el texto en su registro, y no reenvía los errores de Gemini.
 
 Si el proxy no responde o se alcanza el límite, el avatar avisa (evento `aviso`) y sigue con la boca sintética. Los navegadores solo dejan sonar audio después de un clic o una tecla del usuario: llama a `decir` desde un gesto (un botón, un formulario).
 
 No hay modo «llave en el navegador del visitante». La documentación de Gemini no garantiza que su API REST acepte llamadas directas desde una página (CORS) y pide expresamente no exponer la llave del lado del cliente y usar un servidor intermedio; sus tokens efímeros son solo para la Live API. El proxy es la única vía.
 
-**GitHub Pages.** Sube `ascii-avatar.js`, tu página y la carpeta exportada al repositorio de Pages; sin el proxy, el avatar gesticula y mueve la boca sin sonido. Para voz en un sitio público necesitas alojar el proxy en un servidor tuyo (con `--origin https://tu-usuario.github.io` y `--host 0.0.0.0`), sabiendo que cada visita puede gastar de tu límite diario.
+**GitHub Pages.** Sube `ascii-avatar.js`, tu página y la carpeta exportada al repositorio de Pages; sin el proxy, el avatar gesticula y mueve la boca sin sonido. Dar voz a un sitio público tiene más pasos y riesgos:
+
+- **Contenido mixto.** Una página `https://` no puede llamar a `http://…:8787`: el navegador lo bloquea. El proxy necesita HTTPS, normalmente detrás de un proxy inverso (Caddy, nginx) en un servidor tuyo, con `--origin https://tu-usuario.github.io`.
+- **Detrás de un proxy inverso todas las peticiones llegan desde la misma IP** (la del proxy inverso), así que el límite por IP se vuelve un límite global para todos los visitantes. Con `--trust-proxy` (o `TTS_PROXY_TRUST_PROXY=1`) cuenta por el primer salto de `X-Forwarded-For`; actívalo solo si el proxy inverso es el único camino hacia el proxy de voz (si no, cualquiera puede inventar esa cabecera).
+- **El gasto es tuyo.** Cualquiera puede llamarlo (el `Origin` no lo impide), así que pon un `--limite-diario-mxn` bajo: las visitas solo podrán gastar eso al día y tu panel conserva su parte del límite.
 
 **Demo.** `examples/web/` es una página con un cuadro de texto para hacerlo hablar, con un agente de muestra sintético (una cara dibujada con figuras, `examples/web/muestra-web/`, que regenera `node examples/web/make-sample.mjs`):
 
