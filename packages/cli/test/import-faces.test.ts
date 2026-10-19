@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -368,6 +368,61 @@ describe('runImportFaces con --poses y --clips', () => {
     expect(result.status).toBe('failed');
     expect(result.message).toContain('nod');
     expect(existsSync(agentDir())).toBe(false);
+  });
+
+  it('un enlace roto en la carpeta de clips da un mensaje claro en español', async () => {
+    await writeFaces();
+    mkdirSync(clipsDir, { recursive: true });
+    symlinkSync(join(root, 'no-existe'), join(clipsDir, 'nod'));
+    const result = await runWith({ clips: true });
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('nod');
+    expect(result.message).toMatch(/enlace/i);
+    expect(result.message).not.toContain('ENOENT');
+    expect(existsSync(agentDir())).toBe(false);
+  });
+
+  it('un clip de más de 120 cuadros: failed y dice el máximo', async () => {
+    await writeFaces();
+    const png = await solid(300, 400, 61);
+    mkdirSync(join(clipsDir, 'nod'), { recursive: true });
+    for (let i = 0; i < 121; i++) writeFileSync(join(clipsDir, 'nod', `${String(i).padStart(3, '0')}.png`), png);
+    const result = await runWith({ clips: true });
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('120');
+    expect(existsSync(agentDir())).toBe(false);
+  });
+
+  it('un error inesperado al escribir dice qué tipo de asset falló', async () => {
+    await writeFaces();
+    await run();
+    await writeClip('nod');
+    chmodSync(agentDir(), 0o555);
+    try {
+      const result = await runWith({ faces: false, clips: true });
+      expect(result.status).toBe('failed');
+      expect(result.message).toMatch(/^No se pudieron importar los clips:/);
+    } finally {
+      chmodSync(agentDir(), 0o755);
+    }
+  });
+
+  it('reimportar caras de otro tamaño avisa que las poses y clips actuales se ignorarán', async () => {
+    await writeFaces();
+    await writePoses(['look_left']);
+    await writeClip('nod');
+    await runWith({ poses: true, clips: true });
+    rmSync(facesDir, { recursive: true });
+    const small = await solid(200, 200, 40);
+    await writeFaces(Object.fromEntries(FACE_IDS.map((id) => [id, small])) as Record<FaceId, Buffer>);
+    lines = [];
+    const result = await runWith();
+    expect(result.status).toBe('done');
+    const warning = lines.join('\n');
+    expect(warning).toMatch(/poses/);
+    expect(warning).toMatch(/clips/);
+    expect(warning).toContain('200×200');
+    expect(warning).toMatch(/ignorar/i);
   });
 
   it('con caras válidas pero clips inválidos no escribe nada, ni siquiera las caras', async () => {

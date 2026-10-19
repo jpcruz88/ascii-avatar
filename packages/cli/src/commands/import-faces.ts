@@ -9,6 +9,8 @@ import {
   FACE_IDS,
   POSE_IDS,
   createAgent,
+  listClips,
+  listPoses,
   loadAgent,
   saveClips,
   saveFace,
@@ -44,6 +46,11 @@ const FACE_MIN_SIDE = 64;
 const CLIP_FRAME_RE = /^\d{3}\.png$/;
 /** Un clip necesita al menos dos cuadros para moverse. */
 const CLIP_MIN_FRAMES = 2;
+/** Tope de cuadros por clip: 5 s a 24 fps (más no se nota y alarga la carga del panel). */
+const CLIP_MAX_FRAMES = 120;
+
+/** Qué se está importando, para nombrarlo si algo falla de forma inesperada. */
+type Stage = 'las caras' | 'las poses' | 'los clips';
 
 interface Size {
   width: number;
@@ -137,7 +144,13 @@ async function readClips(dir: string, canvas: Size): Promise<Partial<Record<Clip
   const names = CLIP_IDS.join(', ');
   for (const entry of visibleEntries(dir, 'clips')) {
     const path = join(dir, entry);
-    if (!statSync(path).isDirectory()) continue;
+    let isDir: boolean;
+    try {
+      isDir = statSync(path).isDirectory();
+    } catch {
+      throw new ImageInputError(`No se puede leer "${entry}" en la carpeta de clips (¿un enlace roto?): ${path}`);
+    }
+    if (!isDir) continue;
     if (!(CLIP_IDS as readonly string[]).includes(entry)) {
       throw new ImageInputError(`La carpeta de clip "${entry}" no tiene un nombre conocido. Los clips se llaman ${names}.`);
     }
@@ -148,6 +161,11 @@ async function readClips(dir: string, canvas: Size): Promise<Partial<Record<Clip
     }
     if (files.length < CLIP_MIN_FRAMES) {
       throw new ImageInputError(`El clip ${entry} necesita al menos ${CLIP_MIN_FRAMES} cuadros (000.png, 001.png…).`);
+    }
+    if (files.length > CLIP_MAX_FRAMES) {
+      throw new ImageInputError(
+        `El clip ${entry} tiene ${files.length} cuadros; el máximo es ${CLIP_MAX_FRAMES} (5 s a 24 cuadros por segundo).`,
+      );
     }
     const expected = files.map((_, i) => `${String(i).padStart(3, '0')}.png`);
     const gap = expected.find((f, i) => files[i] !== f);
@@ -166,6 +184,7 @@ async function readClips(dir: string, canvas: Size): Promise<Partial<Record<Clip
 
 export async function runImportFaces(deps: ImportFacesDeps): Promise<ImportFacesResult> {
   const { root, name, facesDir, posesDir, clipsDir, out } = deps;
+  let stage: Stage = 'las caras';
   try {
     validateAgentName(name);
     if (facesDir === undefined && posesDir === undefined && clipsDir === undefined) {
@@ -182,9 +201,13 @@ export async function runImportFaces(deps: ImportFacesDeps): Promise<ImportFaces
       loadAgent(root, name);
       if (deps.photoPath !== undefined) out(`El agente "${name}" ya existe: se conserva su foto y se ignora --foto.`);
     }
-    const canvas = imported?.size ?? (await readSize(readImageFile(join(dir, 'faces', 'neutral.png'), 'la cara neutral del agente'), 'la cara neutral del agente'));
+    const current = exists ? await agentCanvas(dir) : undefined;
+    const canvas = imported?.size ?? current!;
+    stage = 'las poses';
     const poses = posesDir === undefined ? undefined : await readPoses(posesDir, canvas);
+    stage = 'los clips';
     const clips = clipsDir === undefined ? undefined : await readClips(clipsDir, canvas);
+    stage = 'las caras';
     const photo =
       exists || imported === undefined
         ? undefined
@@ -194,8 +217,12 @@ export async function runImportFaces(deps: ImportFacesDeps): Promise<ImportFaces
 
     if (photo !== undefined) createAgent(root, name, photo, { promptsVersion: 0 });
     if (imported !== undefined) for (const id of FACE_IDS) saveFace(root, name, id, imported.faces[id]);
+    stage = 'las poses';
     if (poses !== undefined) savePoses(root, name, poses);
+    stage = 'los clips';
     if (clips !== undefined) saveClips(root, name, clips);
+    stage = 'las caras';
+    if (imported !== undefined && current !== undefined) warnCanvasChange(root, name, current, imported.size, poses, clips, out);
 
     const config = loadConfig(root);
     if (config.activeAgent === null) saveConfig(root, { ...config, activeAgent: name });
@@ -213,6 +240,38 @@ export async function runImportFaces(deps: ImportFacesDeps): Promise<ImportFaces
   } catch (error) {
     if (error instanceof ImageInputError) return { status: 'failed', message: error.message };
     const first = (error instanceof Error ? error.message : String(error)).split('\n')[0] ?? '';
-    return { status: 'failed', message: `No se pudieron importar las caras: ${first}` };
+    return { status: 'failed', message: `No se pudieron importar ${stage}: ${first}` };
   }
+}
+
+/** Tamaño de las caras que ya tiene el agente (su `neutral.png`). */
+async function agentCanvas(dir: string): Promise<Size> {
+  const label = 'la cara neutral del agente';
+  return readSize(readImageFile(join(dir, 'faces', 'neutral.png'), label), label);
+}
+
+/**
+ * Si las caras nuevas miden distinto que las anteriores, las poses y clips que el agente ya tenía
+ * (y que no se reemplazaron en esta importación) ya no coinciden: el panel los ignorará.
+ */
+function warnCanvasChange(
+  root: string,
+  name: string,
+  before: Size,
+  after: Size,
+  poses: unknown,
+  clips: unknown,
+  out: (line: string) => void,
+): void {
+  if (before.width === after.width && before.height === after.height) return;
+  const stale: string[] = [];
+  if (poses === undefined && listPoses(root, name).length > 0) stale.push('poses');
+  if (clips === undefined && Object.keys(listClips(root, name)).length > 0) stale.push('clips');
+  if (stale.length === 0) return;
+  const what = stale.map((s) => (s === 'poses' ? 'las poses' : 'los clips')).join(' y ');
+  out(
+    `Aviso: las caras nuevas miden ${after.width}×${after.height} px y las anteriores ${before.width}×${before.height} px. ` +
+      `El panel va a ignorar ${what} que ya tenía el agente (no coinciden con el lienzo nuevo) hasta que los vuelvas ` +
+      `a importar con ${stale.map((s) => `--${s}`).join(' y ')}.`,
+  );
 }

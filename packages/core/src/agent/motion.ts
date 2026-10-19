@@ -37,11 +37,27 @@ export function clipsIn(dir: string): Partial<Record<ClipId, number>> {
 }
 
 /**
+ * Arregla lo que dejó una importación interrumpida: si falta `<sub>/` pero quedó un
+ * `<sub>.<tag>.old`, lo restaura (era el juego vigente); luego borra los `.tmp` y `.old` sobrantes.
+ */
+function recoverDir(dir: string, sub: string): void {
+  const leftover = new RegExp(`^${sub}\\.[0-9a-f]+\\.(tmp|old)$`);
+  const entries = readdirSync(dir).filter((e) => leftover.test(e));
+  const target = join(dir, sub);
+  const old = entries.find((e) => e.endsWith('.old'));
+  if (!existsSync(target) && old !== undefined) renameSync(join(dir, old), target);
+  // El restaurado ya no existe con su nombre viejo: `force` lo salta.
+  for (const e of entries) rmSync(join(dir, e), { recursive: true, force: true });
+}
+
+/**
  * Reemplaza `<dir>/<sub>/` entero por `files` (ruta relativa → contenido) casi de forma atómica:
  * escribe todo en una carpeta temporal y la cambia por la anterior con dos `rename`. Si algo falla,
- * la carpeta anterior queda como estaba y no quedan temporales.
+ * la carpeta anterior queda como estaba y no quedan temporales. Antes, arregla lo que haya dejado
+ * una importación interrumpida (ver `recoverDir`).
  */
 export function replaceDir(dir: string, sub: string, files: ReadonlyMap<string, Buffer>): void {
+  recoverDir(dir, sub);
   const tag = randomBytes(6).toString('hex');
   const staging = join(dir, `${sub}.${tag}.tmp`);
   const target = join(dir, sub);

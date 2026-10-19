@@ -21,6 +21,7 @@ import {
   savePoses,
   type FaceId,
 } from '../src/index.js';
+import { replaceDir } from '../src/agent/motion.js';
 
 let root: string;
 const dir = (): string => join(root, 'agents', 'luna');
@@ -98,6 +99,34 @@ describe('savePoses y listPoses', () => {
   it('sin carpeta de poses, no hay poses', async () => {
     await agentWithFaces();
     expect(listPoses(root, 'luna')).toEqual([]);
+  });
+});
+
+describe('replaceDir tras una importación interrumpida', () => {
+  it('borra las carpetas .tmp y .old que quedaron de antes', async () => {
+    await agentWithFaces();
+    mkdirSync(join(dir(), 'poses.aaaaaa.tmp'), { recursive: true });
+    mkdirSync(join(dir(), 'poses.bbbbbb.old'), { recursive: true });
+    mkdirSync(join(dir(), 'clips.cccccc.tmp'), { recursive: true });
+    savePoses(root, 'luna', { nod_up: await solid(3) });
+    const left = readdirSync(dir()).filter((f) => f.startsWith('poses.'));
+    expect(left).toEqual([]);
+    // Las de otro tipo de asset no se tocan desde aquí.
+    expect(existsSync(join(dir(), 'clips.cccccc.tmp'))).toBe(true);
+  });
+
+  it('si falta poses/ pero quedó poses.<tag>.old, la restaura antes de seguir', async () => {
+    await agentWithFaces();
+    mkdirSync(join(dir(), 'poses.dddddd.old'), { recursive: true });
+    writeFileSync(join(dir(), 'poses.dddddd.old', 'look_left.png'), await solid(1));
+    // Una escritura que falla (un archivo y una carpeta con el mismo nombre): queda lo restaurado.
+    const broken = new Map([
+      ['a', Buffer.from('x')],
+      ['a/b.png', Buffer.from('y')],
+    ]);
+    expect(() => replaceDir(dir(), 'poses', broken)).toThrow();
+    expect(listPoses(root, 'luna')).toEqual(['look_left']);
+    expect(readdirSync(dir()).filter((f) => f.startsWith('poses.'))).toEqual([]);
   });
 });
 
