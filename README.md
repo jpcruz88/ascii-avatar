@@ -75,6 +75,8 @@ avatar create <nombre> --caras <carpeta> [--foto <ruta>]
 avatar panel [--agente <nombre>] [--cols <n>] [--modo grabado|glyphs|halfblock]
                                          Abre el panel (tecla v: voz, q: salir)
 avatar voice on|off                      Activa o desactiva la voz
+avatar voz <nombre> [--voz <Nombre>] [--estilo "<texto>"]
+                                         Muestra o cambia la voz y el estilo de voz de un agente
 avatar install-hook [--uninstall] [--settings <ruta>]
                                          Conecta (o desconecta) el avatar con Claude Code
 avatar help                              Muestra esta ayuda
@@ -111,14 +113,14 @@ Todo lo del agente vive en `~/.ascii-avatar/agents/<nombre>/`:
   ledger.jsonl                registro de gasto
   avatar.sock                 canal local entre el hook y el panel (solo mientras el panel está abierto)
   agents/<nombre>/
-    agent.json                nombre, voz, personalidad, fecha, versión de los prompts
+    agent.json                nombre, voz, estilo de voz, personalidad, fecha, versión de los prompts
     photo.png | .jpg | .webp  la foto original
     faces/<id>.png            las ocho caras
 ```
 
 Para compartir un agente basta con copiar la carpeta `agents/<nombre>` (no contiene tu llave). Sí contiene la foto original de la persona, así que compártela solo con permiso.
 
-El campo `voice` de `agent.json` es el nombre de la voz de Gemini (por defecto `Kore`); puedes cambiarlo a otra voz disponible.
+El campo `voice` de `agent.json` es el nombre de la voz de Gemini (por defecto `Kore`) y el campo opcional `voiceStyle` es el estilo con que habla (ver [Voz y estilo de cada agente](#voz-y-estilo-de-cada-agente)). Lo más cómodo es cambiarlos con `avatar voz`.
 
 ## Conectar con Claude Code
 
@@ -191,6 +193,32 @@ El comando recuerda la última opción en `~/.ascii-avatar/config.json` y, si ha
 - Con la voz encendida, cada respuesta se convierte en un resumen corto (se quitan código, rutas y tablas), se sintetiza con Gemini, se reproduce con `afplay` y la boca se mueve según el volumen del audio (cerrada, media, abierta).
 - Con la voz apagada, la boca se mueve igual con el texto del resumen, pero no suena nada. La respuesta sigue en texto en tu terminal.
 - La voz necesita la llave de Gemini y macOS. Sin ellas el avatar sigue funcionando solo con gestos y lo avisa en el pie.
+
+### Voz y estilo de cada agente
+
+Cada agente puede sonar como su personaje: tiene una voz de Gemini (`voice`) y, si quieres, un estilo de habla en texto libre (`voiceStyle`, hasta 300 caracteres) que se envía a Gemini junto con el texto.
+
+```sh
+avatar voz preciado                                  # muestra la voz y el estilo actuales
+avatar voz preciado --voz Algenib                    # cambia solo la voz
+avatar voz preciado --estilo "un hombre mexicano de unos sesenta años, voz grave, cálida y pausada, acento mexicano"
+avatar voz preciado --voz Algenib --estilo "..."     # cambia las dos cosas
+avatar voz preciado --estilo ""                      # quita el estilo
+```
+
+Sin banderas, `avatar voz <nombre>` solo muestra la configuración. Una bandera desconocida muestra la ayuda y sale con código 1.
+
+Algunas voces de Gemini para empezar (la lista completa está en la documentación de voz de Gemini):
+
+| Voz | Tipo | Carácter |
+|---|---|---|
+| `Algenib` | masculina | grave, un poco áspera |
+| `Algieba` | masculina | grave, suave |
+| `Achird` | masculina | cálida, cercana |
+| `Alnilam` | masculina | firme |
+| `Kore` | femenina | firme (es la voz por defecto) |
+
+**Reinicia el panel para aplicar los cambios.** El panel lee la voz y el estilo del agente una sola vez al abrirse, así que si ya está abierto, ciérralo (`q`) y vuelve a abrirlo con `avatar panel`.
 
 ## Costos y topes
 
