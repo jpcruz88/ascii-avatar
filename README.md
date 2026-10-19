@@ -356,6 +356,37 @@ Todo esto lo decide el animador de forma determinista (con la fuente de azar iny
 
 **Arranque y caché.** Convertir 8 caras, 8 poses y 6 clips de 16 cuadros a 150 columnas en modo `grabado` tarda unos 3 s. Por eso el panel guarda los cuadros ya convertidos en `agents/<nombre>/.cache/` (un archivo por modo y ancho, escrito de forma atómica). Cada cuadro se reutiliza mientras no cambien la fecha y el tamaño de sus archivos, el ancho, el modo ni el tono de las caras; con la caché, el mismo agente abre en unos 50 ms. Si cambias un archivo, solo se vuelve a convertir ese cuadro. Una pose o un cuadro de clip dañado o de otro tamaño se descarta (y de un clip con un cuadro malo se descarta el clip entero) sin impedir que el panel abra. Se conservan los 3 archivos de caché más recientes por agente (por ejemplo, si cambias de ancho) y los más viejos se borran solos. Los cuadros comparten los objetos de color, así que la primera carga y la carga desde la caché ocupan lo mismo en memoria (unos 100 MB para 122 cuadros a 150 columnas). Borrar `.cache/` es seguro: se rehace al abrir el panel.
 
+## Movimientos fluidos (opcional, gratis)
+
+`avatar movimientos <nombre>` genera en tu equipo los seis clips de movimiento de cabeza de un agente (`nod`, `tilt_left`, `tilt_right`, `turn_left`, `turn_right`, `think`) a partir de su cara neutral, con [LivePortrait](https://github.com/KlingTeam/LivePortrait). No usa Gemini, no pide llave y no cuesta nada. El movimiento lo calcula LivePortrait, pero lo que se deforma es el grabado original a tamaño completo, así que las líneas siguen nítidas; cada clip empieza y termina exactamente en la cara neutral.
+
+**Instalación (una sola vez).** LivePortrait se instala aparte, no viene en este repositorio. Ocupa unos 630 MB de pesos y 1,2 GB del entorno de Python. Hace falta [uv](https://docs.astral.sh/uv/) (`brew install uv`) y git:
+
+```sh
+git clone https://github.com/KlingTeam/LivePortrait ~/LivePortrait
+cd ~/LivePortrait
+uv venv --python 3.10 venv
+source venv/bin/activate
+uv pip install --index-strategy unsafe-best-match -r requirements_macOS.txt
+uv pip install huggingface_hub==0.25.2
+huggingface-cli download KlingTeam/LivePortrait --local-dir pretrained_weights \
+  --exclude "*.git*" "README.md" "docs/*" "liveportrait_animals/*"
+deactivate
+```
+
+**Uso.**
+
+```sh
+avatar movimientos ana --liveportrait ~/LivePortrait   # los seis clips
+avatar movimientos ana --clips nod,think               # solo esos (los demás se conservan)
+```
+
+La carpeta de LivePortrait se toma de `--liveportrait`, si no de la variable `ASCII_AVATAR_LIVEPORTRAIT` y si no de la configuración: tras la primera ejecución correcta se guarda en `config.json` (`liveportraitDir`) y ya no hace falta repetirla. Debe tener `venv/bin/python` y `pretrained_weights/` (también vale una carpeta que tenga `venv/` y el repositorio en `LivePortrait/`). Antes de lanzar nada se comprueba que todo esté en su sitio y, si falta algo, el mensaje dice qué y cómo arreglarlo.
+
+En un Mac con Apple Silicon tarda alrededor de 1 minuto para los seis clips (unos 10 s por clip más la carga del modelo). Se muestra el avance cuadro a cuadro. Los cuadros se escriben primero en una carpeta temporal y solo al final se importan con la misma validación que `avatar create --clips` y el mismo reemplazo atómico: si algo falla o cancelas con Ctrl-C, se detiene solo ese proceso, se borra la carpeta temporal y el agente queda como estaba. Reinicia el panel para ver los clips nuevos.
+
+Los detalles del generador (ángulos, cuadros por clip, salida JSON) están en [`tools/liveportrait/README.md`](tools/liveportrait/README.md).
+
 ## Experimento opcional: ver la definición y la estabilidad
 
 El repositorio incluye un experimento desechable que convierte las ocho caras a ASCII en los modos `glyphs` y `halfblock` y las alterna como lo haría el avatar. Sirve para juzgar a simple vista si la definición y el parecido te convencen, y para medir si las imágenes están alineadas. Se corre desde la raíz del repositorio:
