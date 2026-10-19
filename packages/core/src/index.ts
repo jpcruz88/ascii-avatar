@@ -45,9 +45,9 @@ export {
 } from './budget/ledger.js';
 export type { SpendKind } from './budget/ledger.js';
 export { InvalidWavError, parseWav } from './audio/wav.js';
-export { mouthTimeline, syntheticMouthTimeline } from './audio/mouth.js';
+export { MOUTH_MIN_HOLD_MS, mouthTimeline, syntheticMouthTimeline } from './audio/mouth.js';
 export type { MouthLevel, MouthStep } from './audio/mouth.js';
 export { spokenSummary } from './text/summary.js';
 export { pickExpression } from './text/expression.js';
-export { Animator } from './anim/animator.js';
+export { Animator, MOUTH_ANTICIPATION_MS, SPEECH_LEAD_IN_MS } from './anim/animator.js';
 export type { AnimatorOptions, SayOptions } from './anim/animator.js';

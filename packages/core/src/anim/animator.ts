@@ -1,20 +1,20 @@
 import type { MouthLevel, MouthStep } from '../audio/mouth.js';
-import type { ExpressionId, FaceId } from '../faces.js';
+import { MOUTH_FRAMES, type ExpressionId, type FrameId } from '../faces.js';
 
 /** Cuánto dura la cara de parpadeo. */
 const BLINK_MS = 150;
-/** Al empezar a hablar se muestra la expresión antes de mover la boca. */
-const LEAD_IN_MS = 500;
+/**
+ * Al empezar a hablar se muestra la expresión antes de mover la boca. El audio debe empezar a
+ * sonar cuando termina este avance, para que boca y voz vayan juntas.
+ */
+export const SPEECH_LEAD_IN_MS = 500;
+const LEAD_IN_MS = SPEECH_LEAD_IN_MS;
+/** La boca se adelanta un poco al audio, como al hablar de verdad (se prepara antes de sonar). */
+export const MOUTH_ANTICIPATION_MS = 60;
 /** Al terminar de hablar se mantiene la expresión antes de volver a reposo. */
 const HOLD_MS = 3000;
 /** Rango [mínimo, máximo] en ms entre parpadeos, según el modo de reposo. */
 const BLINK_EVERY_MS = { idle: [3000, 6000], thinking: [1500, 2500] } as const;
-
-const MOUTH_FACE: Record<MouthLevel, FaceId> = {
-  closed: 'neutral',
-  mid: 'mouth_mid',
-  open: 'mouth_open',
-};
 
 export interface AnimatorOptions {
   /** Fuente de números en [0, 1). Por defecto `Math.random`; en pruebas se inyecta una fija. */
@@ -65,7 +65,7 @@ export class Animator {
     this.state = this.rest('idle', this.tick(nowMs));
   }
 
-  frame(nowMs: number): FaceId {
+  frame(nowMs: number): FrameId {
     const t = this.tick(nowMs);
     let state = this.state;
     if (state.kind === 'speech') {
@@ -85,17 +85,20 @@ export class Animator {
     return startMs + LEAD_IN_MS + Math.max(0, say.durationMs);
   }
 
-  /** Cara durante el habla y la espera posterior (la expresión, o la boca entre medias). */
-  private speechFace(speech: Speech, t: number): FaceId {
+  /**
+   * Cara durante el habla y la espera posterior (la expresión, o la boca entre medias). Los pasos
+   * se ven `MOUTH_ANTICIPATION_MS` antes de su tiempo en el audio (recortados en 0).
+   */
+  private speechFace(speech: Speech, t: number): FrameId {
     const { startMs, say } = speech;
     const elapsed = t - startMs - LEAD_IN_MS;
     if (elapsed < 0 || t >= this.speechEndMs(speech)) return say.expression;
-    let level: MouthLevel = 'closed';
+    let level: MouthLevel = 0;
     for (const step of say.steps) {
-      if (step.tMs > elapsed) break;
+      if (step.tMs - MOUTH_ANTICIPATION_MS > elapsed) break;
       level = step.level;
     }
-    return MOUTH_FACE[level];
+    return MOUTH_FRAMES[level];
   }
 
   private rest(mode: RestMode, sinceMs: number): Rest {
@@ -107,7 +110,7 @@ export class Animator {
     return min + this.rng() * (max - min);
   }
 
-  private restFace(state: Rest, t: number): FaceId {
+  private restFace(state: Rest, t: number): FrameId {
     while (t >= state.nextBlinkMs + BLINK_MS) {
       state.nextBlinkMs += this.blinkInterval(state.mode);
     }

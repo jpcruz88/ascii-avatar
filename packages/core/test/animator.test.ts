@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Animator } from '../src/index.js';
+import { Animator, MOUTH_ANTICIPATION_MS } from '../src/index.js';
 import type { ExpressionId, MouthStep } from '../src/index.js';
 
 const zero = () => 0;
@@ -14,9 +14,9 @@ function speech(
 }
 
 const OPEN_THEN_CLOSED: MouthStep[] = [
-  { tMs: 0, level: 'open' },
-  { tMs: 400, level: 'closed' },
-  { tMs: 800, level: 'mid' },
+  { tMs: 0, level: 4 },
+  { tMs: 400, level: 0 },
+  { tMs: 800, level: 2 },
 ];
 
 describe('Animator en reposo', () => {
@@ -114,15 +114,43 @@ describe('Animator hablando', () => {
     }
   });
 
-  it('sigue los pasos de boca desde los 500 ms', () => {
+  it('sigue los pasos de boca desde los 500 ms, adelantados 60 ms al audio', () => {
+    expect(MOUTH_ANTICIPATION_MS).toBe(60);
     const a = new Animator({ rng: zero });
     a.say(1000, speech(OPEN_THEN_CLOSED, 1200));
     expect(a.frame(1500)).toBe('mouth_open');
-    expect(a.frame(1899)).toBe('mouth_open');
-    expect(a.frame(1900)).toBe('neutral'); // paso closed
-    expect(a.frame(2299)).toBe('neutral');
-    expect(a.frame(2300)).toBe('mouth_mid');
+    expect(a.frame(1839)).toBe('mouth_open');
+    expect(a.frame(1840)).toBe('neutral'); // paso de nivel 0 (400 ms - 60 ms)
+    expect(a.frame(2239)).toBe('neutral');
+    expect(a.frame(2240)).toBe('mouth_mid');
     expect(a.frame(2699)).toBe('mouth_mid');
+  });
+
+  it('cada nivel de apertura tiene su cuadro: 0 neutral, 1 mouth_q1, 2 mouth_mid, 3 mouth_q3, 4 mouth_open', () => {
+    const steps: MouthStep[] = [0, 1, 2, 3, 4].map((level, i) => ({ tMs: 100 + i * 100, level: level as MouthStep['level'] }));
+    const a = new Animator({ rng: zero });
+    a.say(0, speech(steps, 1000));
+    // Con el adelanto, el paso de tMs t se ve en 500 + t - 60.
+    expect(a.frame(500)).toBe('neutral');
+    expect(a.frame(545)).toBe('neutral');
+    expect(a.frame(645)).toBe('mouth_q1');
+    expect(a.frame(745)).toBe('mouth_mid');
+    expect(a.frame(845)).toBe('mouth_q3');
+    expect(a.frame(945)).toBe('mouth_open');
+  });
+
+  it('el adelanto no deja ver la boca antes de que termine el avance de la expresión', () => {
+    const a = new Animator({ rng: zero });
+    a.say(0, speech([{ tMs: 0, level: 0 }, { tMs: 30, level: 1 }], 1000));
+    expect(a.frame(499)).toBe('smile');
+    expect(a.frame(500)).toBe('mouth_q1'); // el paso de 30 ms se adelanta y queda recortado en 0
+  });
+
+  it('el adelanto no alarga el habla: al terminar el audio vuelve la expresión', () => {
+    const a = new Animator({ rng: zero });
+    a.say(0, speech([{ tMs: 0, level: 3 }], 1000));
+    expect(a.frame(1499)).toBe('mouth_q3');
+    expect(a.frame(1500)).toBe('smile');
   });
 
   it('mantiene la expresión 3000 ms al terminar y luego vuelve a reposo', () => {
@@ -136,7 +164,7 @@ describe('Animator hablando', () => {
 
   it('no parpadea al hablar ni en la espera, aunque la agenda lo pidiera', () => {
     const a = new Animator({ rng: zero });
-    a.say(2900, speech([{ tMs: 0, level: 'closed' }], 3000));
+    a.say(2900, speech([{ tMs: 0, level: 0 }], 3000));
     // El reposo habría parpadeado a los 3000 ms.
     expect(a.frame(3000)).toBe('smile');
     expect(a.frame(3500)).toBe('neutral'); // boca cerrada, no parpadeo
@@ -168,7 +196,7 @@ describe('Animator hablando', () => {
 
   it('con duración 0 pasa del avance de 500 ms directo a la espera', () => {
     const a = new Animator({ rng: zero });
-    a.say(0, speech([{ tMs: 0, level: 'open' }], 0));
+    a.say(0, speech([{ tMs: 0, level: 4 }], 0));
     expect(a.frame(499)).toBe('smile');
     expect(a.frame(500)).toBe('smile');
     expect(a.frame(3499)).toBe('smile');
@@ -177,16 +205,16 @@ describe('Animator hablando', () => {
 
   it('con duración negativa se comporta como 0', () => {
     const a = new Animator({ rng: zero });
-    a.say(0, speech([{ tMs: 0, level: 'open' }], -200));
+    a.say(0, speech([{ tMs: 0, level: 4 }], -200));
     expect(a.frame(500)).toBe('smile');
     expect(a.frame(3500)).toBe('neutral');
   });
 
   it('un say en pleno say reemplaza al anterior con un nuevo avance de 500 ms', () => {
     const a = new Animator({ rng: zero });
-    a.say(0, speech([{ tMs: 0, level: 'open' }], 5000, 'smile'));
+    a.say(0, speech([{ tMs: 0, level: 4 }], 5000, 'smile'));
     expect(a.frame(1000)).toBe('mouth_open');
-    a.say(1000, speech([{ tMs: 0, level: 'mid' }], 1000, 'sad'));
+    a.say(1000, speech([{ tMs: 0, level: 2 }], 1000, 'sad'));
     expect(a.frame(1000)).toBe('sad');
     expect(a.frame(1499)).toBe('sad');
     expect(a.frame(1500)).toBe('mouth_mid');
@@ -196,7 +224,7 @@ describe('Animator hablando', () => {
 
   it('thinking durante el habla se ignora', () => {
     const a = new Animator({ rng: zero });
-    a.say(0, speech([{ tMs: 0, level: 'open' }], 2000));
+    a.say(0, speech([{ tMs: 0, level: 4 }], 2000));
     a.thinking(1000);
     expect(a.frame(1000)).toBe('mouth_open');
     expect(a.frame(2499)).toBe('mouth_open');
@@ -205,7 +233,7 @@ describe('Animator hablando', () => {
 
   it('thinking durante la espera posterior pasa a pensando', () => {
     const a = new Animator({ rng: zero });
-    a.say(0, speech([{ tMs: 0, level: 'open' }], 1000)); // habla hasta 1500, espera hasta 4500
+    a.say(0, speech([{ tMs: 0, level: 4 }], 1000)); // habla hasta 1500, espera hasta 4500
     a.thinking(2000);
     expect(a.frame(2000)).toBe('neutral');
     expect(a.frame(3499)).toBe('neutral');
@@ -214,7 +242,7 @@ describe('Animator hablando', () => {
 
   it('idle durante el habla vuelve a reposo de inmediato', () => {
     const a = new Animator({ rng: zero });
-    a.say(0, speech([{ tMs: 0, level: 'open' }], 5000));
+    a.say(0, speech([{ tMs: 0, level: 4 }], 5000));
     a.idle(1000);
     expect(a.frame(1000)).toBe('neutral');
     expect(a.frame(3999)).toBe('neutral');
