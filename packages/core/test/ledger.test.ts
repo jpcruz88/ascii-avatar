@@ -213,16 +213,27 @@ describe('assertWithinCap', () => {
     expect(() => assertWithinCap(0, 0.06, Number.POSITIVE_INFINITY)).toThrow(Error);
   });
 
-  it('el mensaje está en español e incluye los montos', () => {
+  it('el mensaje está en español e incluye los montos en pesos, sin dólares', () => {
     try {
       assertWithinCap(1.55, 0.06, 1.6);
       expect.unreachable();
     } catch (err) {
       expect(err).toBeInstanceOf(BudgetExceededError);
       expect((err as Error).name).toBe('BudgetExceededError');
-      expect((err as Error).message).toMatch(/1\.55/);
-      expect((err as Error).message).toMatch(/0\.06/);
-      expect((err as Error).message).toMatch(/1\.60?/);
+      expect((err as Error).message).toContain('$28.52 MXN');
+      expect((err as Error).message).toContain('$1.10 MXN');
+      expect((err as Error).message).toContain('$29.44 MXN');
+      expect((err as Error).message).not.toMatch(/USD/);
+    }
+  });
+
+  it('el mensaje usa el tipo de cambio que se le pasa', () => {
+    try {
+      assertWithinCap(1, 1, 1.5, 20);
+      expect.unreachable();
+    } catch (err) {
+      expect((err as Error).message).toContain('$20.00 MXN');
+      expect((err as Error).message).toContain('$30.00 MXN');
     }
   });
 });

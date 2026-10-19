@@ -1,5 +1,6 @@
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { DEFAULT_MXN_PER_USD, formatMxn } from './money.js';
 
 /** Tope duro de gasto en creación (imágenes y demás) por agente, en USD. */
 export const CREATION_CAP_USD = 1.6;
@@ -25,23 +26,30 @@ export class BudgetExceededError extends Error {
     readonly spent: number,
     readonly next: number,
     readonly cap: number,
+    mxnPerUsd: number = DEFAULT_MXN_PER_USD,
   ) {
+    // Los montos son USD; el mensaje los muestra en pesos.
     super(
-      `Presupuesto excedido: ya se gastaron $${spent.toFixed(2)} USD y este gasto de ` +
-        `$${next.toFixed(2)} USD superaría el tope de $${cap.toFixed(2)} USD.`,
+      `Presupuesto excedido: ya se gastaron ${formatMxn(spent, mxnPerUsd)} y este gasto de ` +
+        `${formatMxn(next, mxnPerUsd)} superaría el tope de ${formatMxn(cap, mxnPerUsd)}.`,
     );
     this.name = 'BudgetExceededError';
   }
 }
 
 /** Lanza `BudgetExceededError` si `spent + next` supera `cap`; también si algún valor no es finito. */
-export function assertWithinCap(spent: number, next: number, cap: number): void {
+export function assertWithinCap(
+  spent: number,
+  next: number,
+  cap: number,
+  mxnPerUsd: number = DEFAULT_MXN_PER_USD,
+): void {
   if (!Number.isFinite(spent) || !Number.isFinite(next) || !Number.isFinite(cap)) {
     throw new Error(
       `Montos de presupuesto inválidos: gastado=${spent}, siguiente=${next}, tope=${cap}. Deben ser números finitos.`,
     );
   }
-  if (spent + next > cap + EPSILON) throw new BudgetExceededError(spent, next, cap);
+  if (spent + next > cap + EPSILON) throw new BudgetExceededError(spent, next, cap, mxnPerUsd);
 }
 
 function sameLocalDay(a: Date, b: Date): boolean {

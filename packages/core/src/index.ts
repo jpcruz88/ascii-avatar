@@ -49,6 +49,7 @@ export {
   assertWithinCap,
 } from './budget/ledger.js';
 export type { SpendKind } from './budget/ledger.js';
+export { DEFAULT_MXN_PER_USD, formatMxn } from './budget/money.js';
 export { InvalidWavError, parseWav } from './audio/wav.js';
 export { MOUTH_MIN_HOLD_MS, mouthTimeline, syntheticMouthTimeline } from './audio/mouth.js';
 export type { MouthLevel, MouthStep } from './audio/mouth.js';
