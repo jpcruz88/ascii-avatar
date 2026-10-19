@@ -91,8 +91,8 @@ avatar create ana --foto ~/Fotos/ana.jpg
 El nombre del agente va de 1 a 32 caracteres entre `a-z`, `0-9` y guion. Si omites `--foto`, el comando te la pide (acepta PNG, JPG o WebP de hasta 10 MB, con cada lado entre 256 y 8000 px; sirve arrastrar el archivo a la terminal). El flujo es:
 
 1. **Llave de Gemini.** Si no hay una guardada ni definida en `GEMINI_API_KEY`, te la pide sin mostrarla al escribir y la guarda en `~/.ascii-avatar/secrets.json` con permisos 0600 (la carpeta queda en 0700). La llave nunca se guarda dentro de la carpeta del agente ni en el repositorio.
-2. **Estimado y confirmación.** Antes de gastar nada muestra el costo estimado de las caras que faltan (unos $0.036 USD por cara, incluida la foto de entrada, y alrededor de $0.28 USD para las ocho), el tope y lo que ya se gastó en ese agente. Solo continúa si respondes `s`, `si` o `sí`.
-3. **Vista previa barata.** Genera primero una sola cara, `mouth_open`, y la dibuja en la terminal. Si no se parece a ti o la definición no te convence, responde que no: solo gastaste una imagen (unos $0.036 USD). El agente ya quedó creado con esa foto y no se puede cambiar: para reintentar con otra foto, usa un nombre nuevo (`avatar create ana2 --foto otra.jpg`) o borra la carpeta `~/.ascii-avatar/agents/<nombre>` y empieza de cero. Si corres `avatar create` con el mismo nombre y una foto distinta, el comando se detiene sin preguntar ni gastar y te indica la carpeta.
+2. **Estimado y confirmación.** Antes de gastar nada muestra el costo estimado de las caras que faltan (unos $0.055 USD por cara, incluida la foto de entrada, y alrededor de $0.44 USD para las ocho), el tope y lo que ya se gastó en ese agente. Solo continúa si respondes `s`, `si` o `sí`.
+3. **Vista previa barata.** Genera primero una sola cara, `mouth_open`, y la dibuja en la terminal. Si no se parece a ti o la definición no te convence, responde que no: solo gastaste una imagen (unos $0.055 USD). El agente ya quedó creado con esa foto y no se puede cambiar: para reintentar con otra foto, usa un nombre nuevo (`avatar create ana2 --foto otra.jpg`) o borra la carpeta `~/.ascii-avatar/agents/<nombre>` y empieza de cero. Si corres `avatar create` con el mismo nombre y una foto distinta, el comando se detiene sin preguntar ni gastar y te indica la carpeta.
 4. **El resto.** Si apruebas, genera las otras siete caras. Cada una se guarda en disco y se registra su costo apenas termina.
 5. **Tope.** Si el gasto de creación de ese agente llegara a $1.60 USD, se detiene y avisa. Lo ya generado queda guardado.
 
@@ -195,8 +195,8 @@ Las tarifas son las de la documentación oficial de Gemini verificadas el 18 de 
 
 | Concepto | Cifra |
 | --- | --- |
-| Modelo de imágenes | `gemini-nano-banana-2.1`, unos $0.036 USD por cara, incluida la foto de entrada (estimado) |
-| Un agente completo (8 imágenes) | alrededor de $0.28 a $0.30 USD |
+| Modelo de imágenes | `gemini-nano-banana-2.1`, unos $0.055 USD por cara, incluida la foto de entrada (estimado, calibrado con una corrida real: 8 caras costaron $0.42) |
+| Un agente completo (8 imágenes) | alrededor de $0.42 a $0.45 USD |
 | Meta normal de creación | menos de $0.60 USD por agente |
 | Tope duro de creación | $1.60 USD por agente (unos 29 MXN) |
 | Voz | unos $0.03 USD por minuto (tarifa conservadora: el registro sobrestima un poco) |
