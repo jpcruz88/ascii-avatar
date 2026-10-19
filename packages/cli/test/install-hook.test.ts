@@ -260,8 +260,8 @@ describe('stableNodePath', () => {
     const resolve = (): string => {
       throw new Error('no debe llamarse');
     };
-    expect(stableNodePath('/Users/jp/.nvm/versions/node/v26/bin/node', [stable], resolve)).toBe(
-      '/Users/jp/.nvm/versions/node/v26/bin/node',
+    expect(stableNodePath('/Users/alguien/.nvm/versions/node/v26/bin/node', [stable], resolve)).toBe(
+      '/Users/alguien/.nvm/versions/node/v26/bin/node',
     );
   });
 

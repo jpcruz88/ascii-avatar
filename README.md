@@ -210,11 +210,11 @@ El comando recuerda la última opción en `~/.ascii-avatar/config.json` y, si ha
 Cada agente puede sonar como su personaje: tiene una voz de Gemini (`voice`) y, si quieres, un estilo de habla en texto libre (`voiceStyle`, hasta 300 caracteres) que se envía a Gemini junto con el texto.
 
 ```sh
-avatar voz preciado                                  # muestra la voz y el estilo actuales
-avatar voz preciado --voz Algenib                    # cambia solo la voz
-avatar voz preciado --estilo "un hombre mexicano de unos sesenta años, voz grave, cálida y pausada, acento mexicano"
-avatar voz preciado --voz Algenib --estilo "..."     # cambia las dos cosas
-avatar voz preciado --estilo ""                      # quita el estilo
+avatar voz luna                                  # muestra la voz y el estilo actuales
+avatar voz luna --voz Algenib                    # cambia solo la voz
+avatar voz luna --estilo "un hombre mexicano de unos sesenta años, voz grave, cálida y pausada, acento mexicano"
+avatar voz luna --voz Algenib --estilo "..."     # cambia las dos cosas
+avatar voz luna --estilo ""                      # quita el estilo
 ```
 
 Sin banderas, `avatar voz <nombre>` solo muestra la configuración. Una bandera desconocida muestra la ayuda y sale con código 1.
