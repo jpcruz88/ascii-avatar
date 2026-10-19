@@ -41,6 +41,8 @@ export interface PanelControllerDeps {
   agent: string;
   /** Voz de Gemini del agente; por defecto la de la API. */
   voice?: string;
+  /** Estilo de voz del agente (cómo debe sonar); sin estilo, no se envía. */
+  voiceStyle?: string;
   /** Reloj monótono en ms que arranca cerca de 0 (`performance.now`); es el que consume el animador. */
   now: () => number;
 }
@@ -140,7 +142,7 @@ export class PanelController {
 
     let result;
     try {
-      result = await synthesizeSpeech(this.d.tts, summary, this.d.voice ?? DEFAULT_VOICE);
+      result = await synthesizeSpeech(this.d.tts, summary, this.d.voice ?? DEFAULT_VOICE, this.d.voiceStyle);
     } catch (error) {
       // Sin reintento automático; el mensaje del error no se muestra (podría traer datos de la API).
       const notice = error instanceof SpeechRefusedError ? NOTICE_REFUSED : NOTICE_TTS_FAILED;

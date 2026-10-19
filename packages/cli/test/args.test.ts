@@ -43,6 +43,20 @@ describe('parseArgs', () => {
     expect(() => parseArgs(['create', 'ana', '--caras'])).toThrow('--caras');
   });
 
+  it('voz: --voz y --estilo llevan un valor', () => {
+    expect(parseArgs(['voz', 'preciado', '--voz', 'Algenib', '--estilo', 'grave y pausada'])).toEqual({
+      cmd: 'voz',
+      positionals: ['preciado'],
+      flags: { voz: 'Algenib', estilo: 'grave y pausada' },
+    });
+    expect(parseArgs(['voz', 'preciado', '--estilo=un hombre, voz grave']).flags).toEqual({
+      estilo: 'un hombre, voz grave',
+    });
+    expect(parseArgs(['voz', 'preciado', '--estilo', '']).flags).toEqual({ estilo: '' });
+    expect(() => parseArgs(['voz', 'preciado', '--voz'])).toThrow('--voz');
+    expect(() => parseArgs(['voz', 'preciado', '--estilo', '--voz', 'Kore'])).toThrow('--estilo');
+  });
+
   it('tras -- todo es posicional', () => {
     expect(parseArgs(['create', '--', '--raro']).positionals).toEqual(['--raro']);
   });
@@ -55,11 +69,15 @@ describe('unknownFlags', () => {
     expect(unknownFlags('panel', { agente: 'ana', cols: '80', modo: 'glyphs' })).toEqual([]);
     expect(unknownFlags('install-hook', { uninstall: true, settings: 's.json' })).toEqual([]);
     expect(unknownFlags('voice', {})).toEqual([]);
+    expect(unknownFlags('voz', {})).toEqual([]);
+    expect(unknownFlags('voz', { voz: 'Algenib', estilo: 'grave' })).toEqual([]);
   });
 
   it('señala las desconocidas, p. ej. un error de tecleo en --uninstall', () => {
     expect(unknownFlags('install-hook', { unistall: true })).toEqual(['unistall']);
     expect(unknownFlags('voice', { foto: 'x' })).toEqual(['foto']);
+    expect(unknownFlags('voz', { voz: 'Kore', tono: 'x' })).toEqual(['tono']);
+    expect(unknownFlags('voice', { voz: 'Kore' })).toEqual(['voz']);
     expect(unknownFlags('create', { agente: 'x', foto: 'y' })).toEqual(['agente']);
   });
 });

@@ -16,6 +16,9 @@ Uso:
   avatar panel [--agente <nombre>] [--cols <n>] [--modo grabado|glyphs|halfblock]
                                            Abre el panel (tecla v: voz, q: salir)
   avatar voice on|off                      Activa o desactiva la voz
+  avatar voz <nombre> [--voz <Nombre>] [--estilo "<texto>"]
+                                           Muestra o cambia la voz y el estilo de voz de un agente
+                                           (--estilo "" quita el estilo; reinicia el panel para aplicarlo)
   avatar install-hook [--uninstall] [--settings <ruta>]
                                            Conecta (o desconecta) el avatar con Claude Code
   avatar help                              Muestra esta ayuda
@@ -160,6 +163,28 @@ async function panel(args: ParsedArgs, root: string): Promise<number> {
   }
 }
 
+async function voz(args: ParsedArgs, root: string): Promise<number> {
+  const [name] = args.positionals;
+  if (name === undefined) {
+    return fail(`Uso: avatar voz <nombre> [--voz <Nombre>] [--estilo "<texto>"]\n\n${HELP}`);
+  }
+  const { voz: vozFlag, estilo } = args.flags;
+  if (vozFlag === true || estilo === true) return fail('Faltan valores en las opciones.');
+  try {
+    const { runVoz } = await import('./commands/voz.js');
+    const r = runVoz({
+      root,
+      name,
+      ...(vozFlag === undefined ? {} : { voz: vozFlag }),
+      ...(estilo === undefined ? {} : { estilo }),
+    });
+    (r.ok ? console.log : console.error)(r.message);
+    return r.ok ? 0 : 1;
+  } catch (error) {
+    return fail(error instanceof Error ? (error.message.split('\n')[0] ?? 'Error.') : 'Error.');
+  }
+}
+
 async function installHookCmd(args: ParsedArgs): Promise<number> {
   const { installHook, uninstallHook } = await import('./commands/install-hook.js');
   const flag = args.flags.settings;
@@ -191,7 +216,7 @@ async function main(argv: string[]): Promise<number> {
   }
   if (args.cmd !== undefined) {
     const unknown = unknownFlags(args.cmd, args.flags);
-    if (unknown.length > 0 && ['create', 'panel', 'voice', 'install-hook', 'help'].includes(args.cmd)) {
+    if (unknown.length > 0 && ['create', 'panel', 'voice', 'voz', 'install-hook', 'help'].includes(args.cmd)) {
       return fail(`Opción desconocida: ${unknown.map((f) => `--${f}`).join(', ')}\n\n${HELP}`);
     }
   }
@@ -214,6 +239,8 @@ async function main(argv: string[]): Promise<number> {
         return fail(`No se pudo cambiar la voz: ${error instanceof Error ? (error.message.split('\n')[0] ?? 'Error.') : 'Error.'}`);
       }
     }
+    case 'voz':
+      return voz(args, root);
     case 'install-hook':
       return installHookCmd(args);
     default:

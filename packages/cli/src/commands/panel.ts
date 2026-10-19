@@ -51,8 +51,9 @@ export async function runPanel(opts: PanelOptions): Promise<number> {
     return 1;
   }
   let voice: string;
+  let voiceStyle: string | undefined;
   try {
-    voice = loadAgent(root, name).voice;
+    ({ voice, voiceStyle } = loadAgent(root, name));
   } catch {
     console.error(`No se encontró el agente "${name}". Crea uno con \`avatar create\`.`);
     return 1;
@@ -93,6 +94,7 @@ export async function runPanel(opts: PanelOptions): Promise<number> {
     config,
     agent: name,
     voice,
+    ...(voiceStyle === undefined ? {} : { voiceStyle }),
     now,
   });
 

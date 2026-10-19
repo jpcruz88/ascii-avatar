@@ -129,6 +129,30 @@ describe('PanelController', () => {
     expect(s.tts.speak).toHaveBeenCalledWith(expect.objectContaining({ voice: 'Puck' }));
   });
 
+  it('pasa el estilo de voz del agente a la síntesis, y sin estilo no manda la clave', async () => {
+    const s = setup();
+    const withStyle = new PanelController({
+      root,
+      animator: s.animator,
+      ledger: s.ledger,
+      tts: s.tts,
+      player: { play: s.play },
+      config: s.config,
+      agent: 'luna',
+      voice: 'Algenib',
+      voiceStyle: 'un hombre mexicano de sesenta años',
+      now: () => nowMs,
+    });
+    await withStyle.handle({ type: 'say', text: PROSE });
+    expect(s.tts.speak).toHaveBeenLastCalledWith({
+      text: expect.any(String),
+      voice: 'Algenib',
+      style: 'un hombre mexicano de sesenta años',
+    });
+    await s.controller.handle({ type: 'say', text: PROSE });
+    expect(s.tts.speak.mock.calls.at(-1)?.[0]).not.toHaveProperty('style');
+  });
+
   it('con la voz apagada no llama a TTS ni a play y anima con la boca sintética', async () => {
     const s = setup({ voice: false });
     await s.controller.handle({ type: 'say', text: PROSE });
