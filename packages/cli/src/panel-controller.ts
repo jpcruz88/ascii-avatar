@@ -20,6 +20,13 @@ import { loadConfig, saveConfig, type CliConfig } from './config.js';
 import type { Msg } from './ipc.js';
 import type { AudioPlayer, Playback } from './player.js';
 
+/**
+ * El reproductor (`afplay`) empieza a sonar unas decenas de ms después de lanzarlo: el audio se
+ * lanza este tanto antes de que la boca empiece a moverse, para que el sonido llegue a tiempo.
+ * La boca sigue adelantándose `MOUTH_ANTICIPATION_MS` al sonido real.
+ */
+export const AUDIO_START_LATENCY_MS = 80;
+
 /** Cuánto tiempo se muestra un aviso, en ms. */
 const NOTICE_TTL_MS = 10_000;
 
@@ -191,9 +198,12 @@ export class PanelController {
 
   /**
    * El animador muestra primero la expresión (`SPEECH_LEAD_IN_MS`) y luego mueve la boca desde el
-   * inicio del audio: el audio arranca justo entonces para que boca y voz vayan juntas.
+   * inicio del audio: el reproductor se lanza `AUDIO_START_LATENCY_MS` antes, para que empiece a
+   * sonar justo entonces y boca y voz vayan juntas. Cancela cualquier arranque pendiente anterior.
    */
   private schedulePlayback(wav: Buffer): void {
+    this.cancelPendingStart?.();
+    this.cancelPendingStart = null;
     const schedule = this.d.schedule ?? defaultSchedule;
     const pending = { cancelled: false, started: false, cancelTimer: (): void => undefined };
     const cancel = (): void => {
@@ -201,7 +211,7 @@ export class PanelController {
       pending.cancelTimer();
     };
     this.cancelPendingStart = cancel;
-    pending.cancelTimer = schedule(SPEECH_LEAD_IN_MS, () => {
+    pending.cancelTimer = schedule(Math.max(0, SPEECH_LEAD_IN_MS - AUDIO_START_LATENCY_MS), () => {
       if (pending.cancelled || pending.started || this.closed) return;
       pending.started = true;
       if (this.cancelPendingStart === cancel) this.cancelPendingStart = null;

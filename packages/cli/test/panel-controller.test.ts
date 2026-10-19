@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Animator, DEFAULT_DAILY_LIMIT_USD, Ledger, SPEECH_LEAD_IN_MS } from '@ascii-avatar/core';
 import { SpeechRefusedError, ttsCostUsd, type TtsClient } from '@ascii-avatar/gemini';
 import { loadConfig, saveConfig, type CliConfig } from '../src/config.js';
-import { PanelController } from '../src/panel-controller.js';
+import { AUDIO_START_LATENCY_MS, PanelController } from '../src/panel-controller.js';
 import type { AudioPlayer } from '../src/player.js';
 
 /** Programador de pruebas: arranca el audio en el acto, sin esperar el avance de la expresión. */
@@ -315,7 +315,9 @@ describe('PanelController: el audio va junto con la boca', () => {
     expect(s.say).toHaveBeenCalledTimes(1);
     expect(s.play).not.toHaveBeenCalled();
     expect(m.tasks).toHaveLength(1);
-    expect(m.tasks[0]!.ms).toBe(SPEECH_LEAD_IN_MS);
+    // El reproductor tarda en sonar desde que arranca: se lanza ese tanto antes del fin del avance.
+    expect(AUDIO_START_LATENCY_MS).toBe(80);
+    expect(m.tasks[0]!.ms).toBe(SPEECH_LEAD_IN_MS - AUDIO_START_LATENCY_MS);
     m.tasks[0]!.fn();
     expect(s.play).toHaveBeenCalledTimes(1);
     expect(s.play).toHaveBeenCalledWith(WAV);
@@ -353,5 +355,59 @@ describe('PanelController: el audio va junto con la boca', () => {
     expect(() => m.tasks[0]!.fn()).not.toThrow();
     expect(s.controller.notice()).toMatch(/audio/i);
     expect(s.say).toHaveBeenCalledTimes(1);
+  });
+
+  it('programar un arranque cancela el que estaba pendiente', () => {
+    const m = manual();
+    const s = setup({ schedule: m.schedule });
+    const schedulePlayback = (wav: Buffer): void =>
+      (s.controller as unknown as { schedulePlayback(w: Buffer): void }).schedulePlayback(wav);
+    schedulePlayback(WAV);
+    schedulePlayback(WAV);
+    expect(m.tasks[0]!.cancel).toHaveBeenCalledTimes(1);
+    m.tasks[0]!.fn();
+    expect(s.play).not.toHaveBeenCalled();
+    m.tasks[1]!.fn();
+    expect(s.play).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('PanelController con el programador por defecto (setTimeout)', () => {
+  afterEach(() => vi.useRealTimers());
+
+  /** Como `setup`, pero sin programador inyectado: usa el de verdad sobre temporizadores falsos. */
+  function setupReal(): Setup {
+    const s = setup();
+    const controller = new PanelController({
+      root,
+      animator: s.animator,
+      ledger: s.ledger,
+      tts: s.tts as unknown as TtsClient,
+      player: { play: s.play },
+      config: s.config,
+      agent: 'luna',
+      now: () => nowMs,
+    });
+    return { ...s, controller };
+  }
+
+  it('el audio arranca a los SPEECH_LEAD_IN_MS - AUDIO_START_LATENCY_MS ms', async () => {
+    vi.useFakeTimers();
+    const s = setupReal();
+    await s.controller.handle({ type: 'say', text: PROSE });
+    vi.advanceTimersByTime(SPEECH_LEAD_IN_MS - AUDIO_START_LATENCY_MS - 1);
+    expect(s.play).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(s.play).toHaveBeenCalledTimes(1);
+  });
+
+  it('close() cancela el arranque pendiente', async () => {
+    vi.useFakeTimers();
+    const s = setupReal();
+    await s.controller.handle({ type: 'say', text: PROSE });
+    s.controller.close();
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(SPEECH_LEAD_IN_MS * 2);
+    expect(s.play).not.toHaveBeenCalled();
   });
 });
