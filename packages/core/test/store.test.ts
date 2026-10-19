@@ -15,6 +15,7 @@ import {
   CorruptAgentError,
   FACE_IDS,
   InvalidAgentNameError,
+  InvalidFaceImageError,
   InvalidPhotoError,
   createAgent,
   loadAgent,
@@ -139,6 +140,27 @@ describe('caras', () => {
     createAgent(root, 'luna', photo);
     expect(() => saveFace(root, 'luna', '../evil' as FaceId, photo)).toThrow();
     expect(() => saveFace(root, 'luna', 'mouth_closed' as FaceId, photo)).toThrow();
+  });
+});
+
+describe('saveFace: contrato PNG', () => {
+  it('rechaza bytes de JPEG con InvalidFaceImageError y no escribe nada', async () => {
+    const photo = await png4x4(10);
+    createAgent(root, 'luna', photo);
+    const jpeg = await sharp({
+      create: { width: 4, height: 4, channels: 3, background: { r: 9, g: 9, b: 9 } },
+    })
+      .jpeg()
+      .toBuffer();
+    expect(() => saveFace(root, 'luna', 'neutral', jpeg)).toThrow(InvalidFaceImageError);
+    expect(() => saveFace(root, 'luna', 'neutral', jpeg)).toThrow(/PNG/);
+    expect(missingFaces(root, 'luna')).toEqual([...FACE_IDS]);
+  });
+
+  it('rechaza un buffer vacío o basura', async () => {
+    createAgent(root, 'luna', await png4x4(10));
+    expect(() => saveFace(root, 'luna', 'neutral', Buffer.alloc(0))).toThrow(InvalidFaceImageError);
+    expect(() => saveFace(root, 'luna', 'neutral', Buffer.from('no soy png'))).toThrow(InvalidFaceImageError);
   });
 });
 

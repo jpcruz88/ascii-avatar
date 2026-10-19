@@ -9,6 +9,7 @@ export {
   AgentNotFoundError,
   CorruptAgentError,
   InvalidAgentNameError,
+  InvalidFaceImageError,
   InvalidPhotoError,
   createAgent,
   loadAgent,

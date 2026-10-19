@@ -7,15 +7,17 @@ import { FACE_IDS, Ledger, loadAgent, missingFaces } from '@ascii-avatar/core';
 import {
   ESTIMATED_FACE_COST_USD,
   FACE_PROMPTS,
+  imageCostUsd,
   ImageRefusedError,
   PROMPTS_VERSION,
   type ImageClient,
 } from '@ascii-avatar/gemini';
 import { runCreate, type CreateDeps } from '../src/commands/create.js';
+import { runImportFaces } from '../src/commands/import-faces.js';
 import { loadConfig, saveConfig } from '../src/config.js';
 
 /** Costo que informa el cliente falso por llamada (1300 tokens de entrada y 1120 de salida). */
-const FACE_COST = ESTIMATED_FACE_COST_USD;
+const FACE_COST = imageCostUsd(1300, 1120);
 
 let root: string;
 let photoPath: string;
@@ -58,7 +60,7 @@ function fakeClient(opts: FakeOptions = {}): ImageClient {
       events.push('call');
       if (opts.refuse) throw new ImageRefusedError('bloqueado');
       if (opts.failOn?.includes(calls)) throw new Error('fallo de red simulado');
-      return { png: tinyPng, inputTokens: 1300, outputTokens: 1120 };
+      return { image: tinyPng, inputTokens: 1300, outputTokens: 1120 };
     },
   };
 }
@@ -92,6 +94,38 @@ const output = (): string =>
     .join('\n');
 const facesDir = (): string => join(root, 'agents', 'luna', 'faces');
 
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+describe('runCreate: Gemini devuelve JPEG', () => {
+  it('guarda caras con firma PNG real y import-faces acepta esa carpeta', async () => {
+    // La llamada real de Gemini devuelve JPEG (magic ffd8ffe0), no PNG.
+    const jpeg = await sharp({
+      create: { width: 300, height: 400, channels: 3, background: { r: 200, g: 120, b: 90 } },
+    })
+      .jpeg()
+      .toBuffer();
+    expect(jpeg.subarray(0, 2).toString('hex')).toBe('ffd8');
+    const client: ImageClient = {
+      async editImage() {
+        return { image: jpeg, inputTokens: 1300, outputTokens: 1120 };
+      },
+    };
+
+    const result = await runCreate(makeDeps({ imageClient: client }));
+
+    expect(result.status).toBe('done');
+    for (const id of FACE_IDS) {
+      const saved = readFileSync(join(facesDir(), `${id}.png`));
+      expect(saved.subarray(0, 8).equals(PNG_SIGNATURE)).toBe(true);
+    }
+
+    const lines: string[] = [];
+    const imported = await runImportFaces({ root, name: 'luna2', facesDir: facesDir(), out: (s) => lines.push(s) });
+    expect(imported.status).toBe('done');
+    expect(missingFaces(root, 'luna2')).toEqual([]);
+  });
+});
+
 describe('runCreate: camino feliz', () => {
   it('genera las 8 caras, registra el gasto y muestra el estimado antes de la primera llamada', async () => {
     const deps = makeDeps();
@@ -109,7 +143,7 @@ describe('runCreate: camino feliz', () => {
     expect(estimateAt).toBeGreaterThanOrEqual(0);
     expect(estimateAt).toBeLessThan(firstCallAt);
     expect(output()).toContain('(tope $1.60)');
-    expect(output()).toContain(`Estimado: $${(8 * FACE_COST).toFixed(2)} USD`);
+    expect(output()).toContain(`Estimado: $${(8 * ESTIMATED_FACE_COST_USD).toFixed(2)} USD`);
     // La confirmación también llega antes de gastar.
     const askAt = events.findIndex((e) => e.startsWith('ask:'));
     expect(askAt).toBeLessThan(firstCallAt);
@@ -141,7 +175,7 @@ describe('runCreate: camino feliz', () => {
   it('marca como estimado el costo cuando la API no informó tokens', async () => {
     const client: ImageClient = {
       async editImage() {
-        return { png: tinyPng, inputTokens: null, outputTokens: null };
+        return { image: tinyPng, inputTokens: null, outputTokens: null };
       },
     };
     const result = await runCreate(makeDeps({ imageClient: client }));
@@ -189,14 +223,14 @@ describe('runCreate: confirmaciones', () => {
 
 describe('runCreate: tope', () => {
   it('se detiene con status capped cuando la siguiente cara superaría el tope', async () => {
-    const deps = makeDeps({ cap: 0.05 });
+    const deps = makeDeps({ cap: 0.08 });
     const result = await runCreate(deps);
     expect(result.status).toBe('capped');
     expect(result.message).toContain('tope');
     expect(missingFaces(root, 'luna').length).toBeGreaterThan(0);
     expect(calls).toBe(1);
-    expect(deps.ledger.spentCreation('luna')).toBeLessThanOrEqual(0.05);
-    expect(output()).toContain('(tope $0.05)');
+    expect(deps.ledger.spentCreation('luna')).toBeLessThanOrEqual(0.08);
+    expect(output()).toContain('(tope $0.08)');
   });
 
   it('cuenta lo ya gastado en corridas anteriores del mismo agente', async () => {
@@ -404,7 +438,7 @@ describe('runCreate: validación de la foto', () => {
     const client: ImageClient = {
       async editImage(input) {
         mimes.push(input.mimeType);
-        return { png: tinyPng, inputTokens: 1300, outputTokens: 1120 };
+        return { image: tinyPng, inputTokens: 1300, outputTokens: 1120 };
       },
     };
     const result = await runCreate(makeDeps({ photoPath: file, imageClient: client }));

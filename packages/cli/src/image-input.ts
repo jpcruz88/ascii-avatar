@@ -14,6 +14,14 @@ export interface Photo {
   mimeType: Mime;
 }
 
+/**
+ * Normaliza cualquier imagen (JPEG, WebP, PNG…) a un PNG real. Es el punto que garantiza el contrato
+ * "las caras son PNG": Gemini devuelve JPEG y `saveFace` solo acepta PNG. Lanza si no es una imagen.
+ */
+export async function toPng(buf: Buffer): Promise<Buffer> {
+  return sharp(buf).png().toBuffer();
+}
+
 /** Error esperado: su mensaje ya está en español y es seguro mostrarlo tal cual. */
 export class ImageInputError extends Error {}
 

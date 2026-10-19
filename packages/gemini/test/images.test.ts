@@ -19,16 +19,22 @@ describe('pricing', () => {
     expect(imageCostUsd(0, 0)).toBe(0);
   });
 
-  it('estimateCreationCostUsd(8) está entre 0.25 y 0.40', () => {
+  it('ESTIMATED_FACE_COST_USD ronda 0.055 (calibrado con la corrida en vivo: 8 caras = $0.4203)', () => {
+    expect(ESTIMATED_FACE_COST_USD).toBeCloseTo(0.055, 3);
+    // Nunca por debajo de lo que costó de verdad cada cara en la corrida en vivo.
+    expect(ESTIMATED_FACE_COST_USD).toBeGreaterThanOrEqual(0.4203 / 8);
+  });
+
+  it('estimateCreationCostUsd(8) está entre 0.42 y 0.46', () => {
     const cost = estimateCreationCostUsd(8);
-    expect(cost).toBeGreaterThanOrEqual(0.25);
-    expect(cost).toBeLessThanOrEqual(0.4);
+    expect(cost).toBeGreaterThanOrEqual(0.42);
+    expect(cost).toBeLessThanOrEqual(0.46);
   });
 });
 
 describe('generateFace', () => {
   const photo = Buffer.from('foto');
-  const png = Buffer.from('png-falso');
+  const image = Buffer.from('imagen-falsa');
 
   function clientWith(result: {
     inputTokens: number | null;
@@ -38,7 +44,7 @@ describe('generateFace', () => {
     const client: ImageClient = {
       async editImage(input) {
         calls.push(input);
-        return { png, ...result };
+        return { image, ...result };
       },
     };
     return { client, calls };
@@ -49,7 +55,7 @@ describe('generateFace', () => {
 
     const result = await generateFace(client, photo, 'image/jpeg', 'smile');
 
-    expect(result.png).toBe(png);
+    expect(result.image).toBe(image);
     expect(result.costUsd).toBeCloseTo(0.03555, 5);
     expect(result.costEstimated).toBe(false);
     expect(calls).toHaveLength(1);
@@ -67,7 +73,7 @@ describe('generateFace', () => {
 
     const result = await generateFace(client, photo, 'image/png', 'blink');
 
-    expect(result.png).toBe(png);
+    expect(result.image).toBe(image);
     expect(result.costUsd).toBe(ESTIMATED_FACE_COST_USD);
     expect(result.costEstimated).toBe(true);
   });
@@ -111,7 +117,7 @@ describe('createGeminiImageClient', () => {
 
     const out = await client.editImage({ prompt: 'haz algo', image: photo, mimeType: 'image/png' });
 
-    expect(out.png.equals(png)).toBe(true);
+    expect(out.image.equals(png)).toBe(true);
     expect(out.inputTokens).toBe(1300);
     expect(out.outputTokens).toBe(1120);
     expect(requests).toEqual([
@@ -172,7 +178,7 @@ describe('createGeminiImageClient', () => {
     const { ai } = fakeAi({ output_image: { data: png.toString('base64') } });
     const client = createGeminiImageClient(cfg, ai);
     const out = await client.editImage(edit);
-    expect(out.png.equals(png)).toBe(true);
+    expect(out.image.equals(png)).toBe(true);
     expect(out.inputTokens).toBeNull();
     expect(out.outputTokens).toBeNull();
   });

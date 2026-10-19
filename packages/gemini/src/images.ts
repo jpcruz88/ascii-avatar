@@ -17,7 +17,11 @@ export interface ImageEditInput {
 }
 
 export interface ImageEditResult {
-  png: Buffer;
+  /**
+   * Bytes de la imagen tal como los devolvió la API, en cualquier formato: Gemini entrega JPEG
+   * aunque se le pida una edición. Quien guarde la cara debe convertirla a PNG antes.
+   */
+  image: Buffer;
   /** `null` si la API no informó el uso (o solo informó una de las dos cifras). */
   inputTokens: number | null;
   outputTokens: number | null;
@@ -74,7 +78,7 @@ export function createGeminiImageClient(
 
       const { inputTokens, outputTokens } = extractUsage(result.usage);
       return {
-        png: Buffer.from(data, 'base64'),
+        image: Buffer.from(data, 'base64'),
         inputTokens,
         outputTokens,
       };
@@ -83,7 +87,8 @@ export function createGeminiImageClient(
 }
 
 /**
- * Genera una cara a partir de la foto. El costo sale de los tokens de uso; si la
+ * Genera una cara a partir de la foto. `image` puede venir en cualquier formato (en la práctica JPEG):
+ * no es un PNG garantizado. El costo sale de los tokens de uso; si la
  * API no los informó, se devuelve la estimación con `costEstimated: true`.
  */
 export async function generateFace(
@@ -91,14 +96,14 @@ export async function generateFace(
   photo: Buffer,
   mimeType: string,
   face: FaceId,
-): Promise<{ png: Buffer; costUsd: number; costEstimated: boolean }> {
-  const { png, inputTokens, outputTokens } = await client.editImage({
+): Promise<{ image: Buffer; costUsd: number; costEstimated: boolean }> {
+  const { image, inputTokens, outputTokens } = await client.editImage({
     prompt: FACE_PROMPTS[face],
     image: photo,
     mimeType,
   });
   if (inputTokens === null || outputTokens === null) {
-    return { png, costUsd: ESTIMATED_FACE_COST_USD, costEstimated: true };
+    return { image, costUsd: ESTIMATED_FACE_COST_USD, costEstimated: true };
   }
-  return { png, costUsd: imageCostUsd(inputTokens, outputTokens), costEstimated: false };
+  return { image, costUsd: imageCostUsd(inputTokens, outputTokens), costEstimated: false };
 }

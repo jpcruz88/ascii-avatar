@@ -26,7 +26,7 @@ import {
   type ImageClient,
 } from '@ascii-avatar/gemini';
 import { loadConfig, saveConfig } from '../config.js';
-import { ImageInputError, readPhoto, type Photo } from '../image-input.js';
+import { ImageInputError, readPhoto, toPng, type Photo } from '../image-input.js';
 
 export interface CreateDeps {
   root: string;
@@ -130,11 +130,13 @@ export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
     /** Una llamada de pago: tope antes, y guardar y registrar el costo justo después. */
     const generate = async (id: FaceId): Promise<Buffer> => {
       assertWithinCap(ledger.spentCreation(name), ESTIMATED_FACE_COST_USD, cap);
-      const { png, costUsd, costEstimated } = await generateFace(imageClient, photoBuf, mimeType, id);
+      const { image, costUsd, costEstimated } = await generateFace(imageClient, photoBuf, mimeType, id);
+      let png: Buffer;
       try {
+        png = await toPng(image); // Gemini devuelve JPEG; las caras se guardan siempre como PNG real
         saveFace(root, name, id, png);
       } finally {
-        ledger.record('create', name, costUsd); // lo cobrado se registra aunque falle el guardado
+        ledger.record('create', name, costUsd); // lo cobrado se registra aunque falle la conversión o el guardado
       }
       out(`Cara ${id} lista ($${costUsd.toFixed(4)} USD${costEstimated ? ' (estimado)' : ''})`);
       return png;

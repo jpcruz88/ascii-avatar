@@ -38,6 +38,16 @@ export class InvalidPhotoError extends Error {
   }
 }
 
+export class InvalidFaceImageError extends Error {
+  constructor(id: string) {
+    super(
+      `La cara ${id} no es un PNG (la firma del archivo no coincide). ` +
+        'Las caras se guardan siempre como PNG real: convierte la imagen antes de guardarla.',
+    );
+    this.name = 'InvalidFaceImageError';
+  }
+}
+
 export class AgentExistsError extends Error {
   constructor(name: string) {
     super(`Ya existe un agente llamado "${name}".`);
@@ -139,11 +149,19 @@ export function loadAgent(root: string, name: string): AgentConfig {
   return c as unknown as AgentConfig;
 }
 
-/** Guarda el PNG de una cara en `faces/<id>.png`. */
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/**
+ * Guarda el PNG de una cara en `faces/<id>.png`. Contrato: los bytes deben ser un PNG real
+ * (firma de 8 bytes); si no, lanza `InvalidFaceImageError` y no escribe nada.
+ */
 export function saveFace(root: string, name: string, id: FaceId, png: Buffer): void {
   const dir = agentDir(root, name);
   if (!(FACE_IDS as readonly string[]).includes(id)) {
     throw new Error(`Cara desconocida: ${JSON.stringify(id)}.`);
+  }
+  if (png.length < PNG_SIGNATURE.length || !png.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
+    throw new InvalidFaceImageError(id);
   }
   mkdirSync(join(dir, 'faces'), { recursive: true });
   writeFileAtomic(join(dir, 'faces', `${id}.png`), png);

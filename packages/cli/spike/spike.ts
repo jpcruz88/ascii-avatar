@@ -31,6 +31,7 @@ import {
   generateFace,
   loadGeminiConfig,
 } from '@ascii-avatar/gemini';
+import { toPng } from '../src/image-input.js';
 
 const MODES: readonly AsciiMode[] = ['glyphs', 'halfblock'];
 const SEQUENCE: readonly FaceId[] = [
@@ -162,8 +163,9 @@ async function generateFaces(photoPath: string, outDir: string): Promise<Map<Fac
     }
     try {
       const face = await generateFace(client, photo, mimeType, id);
-      await writeFile(join(outDir, `${id}.png`), face.png);
-      faces.set(id, face.png);
+      const png = await toPng(face.image); // Gemini devuelve JPEG; se guarda como PNG real
+      await writeFile(join(outDir, `${id}.png`), png);
+      faces.set(id, png);
       total += face.costUsd;
       console.log(
         `  ${id}: ${usd(face.costUsd)}${face.costEstimated ? ' (estimado)' : ''}  |  total ${usd(total)}`,
