@@ -4,3 +4,4 @@ dist/
 .superpowers/
 *.log
 spike-out/
+.claude/
