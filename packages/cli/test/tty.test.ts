@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { runTty, type TtyOptions } from '../src/tty.js';
+import { FPS_IDLE, FPS_SPEAKING, frameIntervalMs, runTty, type TtyOptions } from '../src/tty.js';
 import type { AsciiFrame } from '@ascii-avatar/core';
 
 const frame: AsciiFrame = {
@@ -56,7 +56,10 @@ function options(stdout: FakeStdout, stdin = new FakeStdin()): TtyOptions {
   };
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe('runTty con la terminal cerrada', () => {
   it('si escribir lanza EIO, el panel termina sin lanzar', async () => {
@@ -68,7 +71,10 @@ describe('runTty con la terminal cerrada', () => {
   it('si el EIO llega a media sesión, termina en silencio y restaura sin lanzar', async () => {
     const stdout = new FakeStdout();
     stdout.failFrom = 3;
-    await expect(runTty(options(stdout))).resolves.toBeUndefined();
+    // El cuadro cambia en cada consulta para que el panel siga escribiendo hasta que falle.
+    const frames = [frame, { ...frame, cells: [...frame.cells].reverse() }];
+    let n = 0;
+    await expect(runTty({ ...options(stdout), getFrame: () => frames[n++ % 2]! })).resolves.toBeUndefined();
     // Se intentó restaurar la pantalla aunque la escritura falle.
     expect(stdout.writes.some((w) => w.includes('\x1b[?1049l'))).toBe(true);
   });
@@ -120,5 +126,93 @@ describe('runTty en modo papel', () => {
     const all = stdout.writes.join('');
     expect(all).toContain('\x1b[48;2;250;250;247m');
     expect(all.endsWith('\x1b[0m\x1b[?25h\x1b[?1049l')).toBe(true);
+  });
+});
+
+describe('ritmo de dibujo', () => {
+  const other: AsciiFrame = { ...frame, cells: frame.cells.map((c) => ({ ...c, ch: 'z' })) };
+  /** Cuántas escrituras de pantalla (no las de entrar o salir) hubo. */
+  const screens = (stdout: FakeStdout): number => stdout.writes.filter((w) => w.includes('luna')).length;
+
+  it('~24 fps al hablar y ~12 fps en reposo', () => {
+    expect(FPS_SPEAKING).toBe(24);
+    expect(FPS_IDLE).toBe(12);
+    expect(frameIntervalMs(true)).toBe(42);
+    expect(frameIntervalMs(false)).toBe(83);
+  });
+
+  it('al hablar consulta el cuadro unas 24 veces por segundo', async () => {
+    vi.useFakeTimers();
+    const stdout = new FakeStdout();
+    const stdin = new FakeStdin();
+    let calls = 0;
+    const done = runTty({ ...options(stdout, stdin), speaking: () => true, getFrame: () => (++calls % 2 === 0 ? frame : other) });
+    calls = 0;
+    vi.advanceTimersByTime(1000);
+    expect(calls).toBeGreaterThanOrEqual(23);
+    expect(calls).toBeLessThanOrEqual(25);
+    // Cada cuadro distinto se dibuja.
+    expect(screens(stdout)).toBeGreaterThanOrEqual(23);
+    stdin.emit('data', Buffer.from('q'));
+    await done;
+  });
+
+  it('en reposo baja a unas 12 veces por segundo', async () => {
+    vi.useFakeTimers();
+    const stdout = new FakeStdout();
+    const stdin = new FakeStdin();
+    let calls = 0;
+    const done = runTty({ ...options(stdout, stdin), speaking: () => false, getFrame: () => (++calls, frame) });
+    calls = 0;
+    vi.advanceTimersByTime(1000);
+    expect(calls).toBeGreaterThanOrEqual(11);
+    expect(calls).toBeLessThanOrEqual(13);
+    stdin.emit('data', Buffer.from('q'));
+    await done;
+  });
+
+  it('cambia de ritmo en cuanto empieza o termina el habla', async () => {
+    vi.useFakeTimers();
+    const stdout = new FakeStdout();
+    const stdin = new FakeStdin();
+    let speaking = false;
+    let calls = 0;
+    const done = runTty({ ...options(stdout, stdin), speaking: () => speaking, getFrame: () => (++calls, frame) });
+    vi.advanceTimersByTime(1000);
+    speaking = true;
+    vi.advanceTimersByTime(100); // el intervalo en curso termina con el ritmo anterior
+    calls = 0;
+    vi.advanceTimersByTime(1000);
+    expect(calls).toBeGreaterThanOrEqual(23);
+    speaking = false;
+    vi.advanceTimersByTime(100);
+    calls = 0;
+    vi.advanceTimersByTime(1000);
+    expect(calls).toBeLessThanOrEqual(13);
+    stdin.emit('data', Buffer.from('q'));
+    await done;
+  });
+
+  it('solo escribe cuando cambia el cuadro o el pie', async () => {
+    vi.useFakeTimers();
+    const stdout = new FakeStdout();
+    const stdin = new FakeStdin();
+    let notice: string | null = null;
+    let current = frame;
+    const done = runTty({ ...options(stdout, stdin), speaking: () => true, getFrame: () => current, notice: () => notice });
+    expect(screens(stdout)).toBe(1);
+    vi.advanceTimersByTime(1000);
+    expect(screens(stdout)).toBe(1); // nada cambió: ni una escritura
+    current = other;
+    vi.advanceTimersByTime(50);
+    expect(screens(stdout)).toBe(2);
+    notice = 'Aviso';
+    vi.advanceTimersByTime(50);
+    expect(screens(stdout)).toBe(3);
+    expect(stdout.writes.at(-1)).toContain('Aviso');
+    stdout.emit('resize');
+    expect(screens(stdout)).toBe(4); // tras cambiar el tamaño se redibuja siempre
+    stdin.emit('data', Buffer.from('q'));
+    await done;
   });
 });

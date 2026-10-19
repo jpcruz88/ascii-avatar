@@ -2,7 +2,9 @@ import { INK, PAPER, frameToAnsi, type AsciiFrame } from '@ascii-avatar/core';
 
 const MIN_COLS = 20;
 const MIN_ROWS = 10;
-const FPS = 12;
+/** Cuadros por segundo mientras el avatar habla (la boca se mueve) y en reposo. */
+export const FPS_SPEAKING = 24;
+export const FPS_IDLE = 12;
 /** Cada cuánto se relee el gasto del día (lee un archivo). */
 const SPENT_REFRESH_MS = 1000;
 
@@ -16,6 +18,11 @@ const RESET = '\x1b[0m';
 const at = (row: number, col = 1): string => `\x1b[${row};${col}H`;
 
 export const TOO_SMALL = 'Terminal muy pequeña';
+
+/** Espera hasta el próximo cuadro: más corta al hablar, para que la boca se vea fluida. */
+export function frameIntervalMs(speaking: boolean): number {
+  return Math.round(1000 / (speaking ? FPS_SPEAKING : FPS_IDLE));
+}
 
 /** Recorta el cuadro al centro para que quepa en la terminal (menos una fila para el pie). */
 export function fitFrame(
@@ -92,7 +99,10 @@ export interface TtyOptions {
   /** Para pruebas; por defecto `process.stdin` y `process.stdout`. */
   stdin?: NodeJS.ReadStream;
   stdout?: NodeJS.WriteStream;
+  /** Devuelve el mismo objeto mientras el cuadro no cambia: así se evita redibujar de más. */
   getFrame(): AsciiFrame;
+  /** Si el avatar está hablando: sube el ritmo de dibujo. Por defecto, no. */
+  speaking?(): boolean;
   voiceOn(): boolean;
   spentToday(): number;
   notice(): string | null;
@@ -106,7 +116,8 @@ function isGone(error: unknown): boolean {
 }
 
 /**
- * Bucle de pantalla alterna a ~12 cuadros por segundo. Resuelve al salir (`q`, Ctrl-C, señal);
+ * Bucle de pantalla alterna a ~24 cuadros por segundo al hablar y ~12 en reposo; solo escribe cuando
+ * cambia el cuadro o el pie (o tras un cambio de tamaño), así en reposo casi no gasta CPU. Resuelve al salir (`q`, Ctrl-C, señal);
  * la terminal siempre se restaura (cursor, pantalla alterna y modo crudo), también ante excepciones.
  * Si la terminal desaparece (EIO/EPIPE al escribir, p. ej. al cerrar la ventana) el panel termina
  * en silencio: escribir a una terminal muerta nunca debe tumbar el proceso con un error.
@@ -119,6 +130,8 @@ export function runTty(o: TtyOptions): Promise<void> {
     let clear = true;
     let restored = false;
     let timer: NodeJS.Timeout | undefined;
+    let lastFrame: AsciiFrame | null = null;
+    let lastFooter: string | null = null;
     // Si el registro de gasto no se puede leer, el pie muestra "?" en vez de tumbar el panel.
     const readSpent = (): number | null => {
       try {
@@ -150,16 +163,27 @@ export function runTty(o: TtyOptions): Promise<void> {
         spentAt = now;
       }
       const footer = footerText({ agent: o.agent, voice: o.voiceOn(), spent, notice: o.notice() });
+      const frame = o.getFrame();
+      if (!clear && frame === lastFrame && footer === lastFooter) return;
       const termCols = stdout.columns || 80;
       const termRows = stdout.rows || 24;
-      const screen = composeScreen({ frame: o.getFrame(), termCols, termRows, footer, clear, paper });
-      if (write(screen)) clear = false;
+      const screen = composeScreen({ frame, termCols, termRows, footer, clear, paper });
+      if (write(screen)) {
+        clear = false;
+        lastFrame = frame;
+        lastFooter = footer;
+      }
+    };
+    const tick = (): void => {
+      draw();
+      if (restored) return;
+      timer = setTimeout(tick, frameIntervalMs(o.speaking?.() ?? false));
     };
 
     const restore = (): void => {
       if (restored) return;
       restored = true;
-      if (timer !== undefined) clearInterval(timer);
+      if (timer !== undefined) clearTimeout(timer);
       try {
         stdout.write(LEAVE_SCREEN);
       } catch {
@@ -220,7 +244,6 @@ export function runTty(o: TtyOptions): Promise<void> {
     for (const [signal, handler] of signals) process.on(signal, handler);
     process.on('uncaughtException', onCrash);
     process.on('exit', restore);
-    timer = setInterval(draw, Math.round(1000 / FPS));
-    draw();
+    tick();
   });
 }

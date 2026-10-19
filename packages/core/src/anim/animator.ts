@@ -65,6 +65,12 @@ export class Animator {
     this.state = this.rest('idle', this.tick(nowMs));
   }
 
+  /** Si la boca se está moviendo (desde `say` hasta que termina el audio): el panel dibuja más rápido. */
+  speaking(nowMs: number): boolean {
+    const t = this.tick(nowMs);
+    return this.state.kind === 'speech' && t < this.speechEndMs(this.state);
+  }
+
   frame(nowMs: number): FrameId {
     const t = this.tick(nowMs);
     let state = this.state;

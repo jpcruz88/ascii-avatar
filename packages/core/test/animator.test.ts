@@ -256,3 +256,22 @@ describe('Animator hablando', () => {
     expect(a.frame(100)).toBe('mouth_open'); // habría sido la expresión
   });
 });
+
+describe('Animator.speaking', () => {
+  it('es verdadero desde say hasta que termina el audio, y falso en la espera y en reposo', () => {
+    const a = new Animator({ rng: zero });
+    expect(a.speaking(0)).toBe(false);
+    a.say(1000, speech(OPEN_THEN_CLOSED, 1200)); // habla de 1000 a 2700
+    expect(a.speaking(1000)).toBe(true);
+    expect(a.speaking(2699)).toBe(true);
+    expect(a.speaking(2700)).toBe(false);
+    expect(a.speaking(9000)).toBe(false);
+  });
+
+  it('idle corta el habla', () => {
+    const a = new Animator({ rng: zero });
+    a.say(0, speech(OPEN_THEN_CLOSED, 1200));
+    a.idle(100);
+    expect(a.speaking(100)).toBe(false);
+  });
+});
