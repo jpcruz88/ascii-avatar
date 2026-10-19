@@ -132,10 +132,59 @@ const SHORT_PAUSE = /[,;:]/u;
 const LONG_PAUSE = /[.!?…]/u;
 const SHORT_PAUSE_WEIGHT = 3;
 const LONG_PAUSE_WEIGHT = 7;
+/** Tope del peso entre dos palabras: ninguna pausa pasa de unos 550 ms por mucha puntuación que se junte. */
+const MAX_GAP_WEIGHT = 10;
+/** Abreviaturas cuyo punto final no cierra la frase si sigue una minúscula. */
+const ABBREVIATIONS = new Set(['etc', 'ej', 'p.ej', 'e.g', 'i.e', 'vs', 'sr', 'sra', 'dr', 'dra', 'aprox', 'pág', 'núm', 'no']);
+const DIGIT = /\p{N}/u;
+const WORD_CHAR = /[\p{L}\p{N}]/u;
+const LOWER = /\p{Ll}/u;
 
-/** Peso de un carácter: 1, o más si es puntuación. */
-function charWeight(c: string): number {
-  return SHORT_PAUSE.test(c) ? SHORT_PAUSE_WEIGHT : LONG_PAUSE.test(c) ? LONG_PAUSE_WEIGHT : 1;
+/**
+ * Si el punto en `i` no es fin de frase: entre dígitos (`3.14`), pegado a una letra o dígito
+ * (`e.g`, `mouth.ts`) o al final de una abreviatura conocida seguida de una minúscula (`etc. y`).
+ */
+function isInnerDot(chars: readonly string[], i: number): boolean {
+  const prev = chars[i - 1] ?? '';
+  const next = chars[i + 1] ?? '';
+  if (WORD_CHAR.test(next) && WORD_CHAR.test(prev)) return true;
+  let j = i + 1;
+  while (j < chars.length && /\s/u.test(chars[j]!)) j++;
+  if (j === i + 1 || j >= chars.length || !LOWER.test(chars[j]!)) return false;
+  let k = i;
+  while (k > 0 && (WORD_CHAR.test(chars[k - 1]!) || chars[k - 1] === '.')) k--;
+  return ABBREVIATIONS.has(chars.slice(k, i).join('').toLowerCase());
+}
+
+/**
+ * Peso de cada carácter (por punto de código): 1, o más si es una pausa. Varios signos de pausa
+ * seguidos (`...`, `?!`) cuentan como uno; un punto que no cierra frase pesa 1; y el peso de lo que
+ * hay entre dos palabras se recorta a `MAX_GAP_WEIGHT`.
+ */
+function charWeights(text: string): number[] {
+  const chars = [...text];
+  const weights = chars.map((c, i): number => {
+    if (LONG_PAUSE.test(c)) {
+      if (i > 0 && LONG_PAUSE.test(chars[i - 1]!)) return 0;
+      if (c === '.' && chars[i + 1] !== '.' && isInnerDot(chars, i)) return 1;
+      return LONG_PAUSE_WEIGHT;
+    }
+    if (SHORT_PAUSE.test(c)) {
+      return c === ',' && DIGIT.test(chars[i - 1] ?? '') && DIGIT.test(chars[i + 1] ?? '') ? 1 : SHORT_PAUSE_WEIGHT;
+    }
+    return 1;
+  });
+  let gap = 0;
+  chars.forEach((c, i) => {
+    if (WORD_CHAR.test(c)) {
+      gap = 0;
+      return;
+    }
+    const allowed = Math.max(0, MAX_GAP_WEIGHT - gap);
+    weights[i] = Math.min(weights[i]!, allowed);
+    gap += weights[i]!;
+  });
+  return weights;
 }
 
 /** Cuánto abre cada vocal en su sílaba tónica: la a abre más, la i y la u menos. */
@@ -170,10 +219,12 @@ interface Syllable {
 function syllables(text: string, durationMs: number): Syllable[] {
   // Tiempo de inicio de cada carácter (unidad UTF-16) según su peso; la duración total no cambia.
   const startWeight: number[] = [];
+  const weights = charWeights(text);
   let total = 0;
+  let n = 0;
   for (const c of text) {
     startWeight.push(total);
-    total += charWeight(c);
+    total += weights[n++]!;
     if (c.length === 2) startWeight.push(total - 0.5);
   }
   startWeight.push(total);
@@ -217,13 +268,15 @@ function syllables(text: string, durationMs: number): Syllable[] {
  * sílaba) dibuja un arco que abre y cierra pasando por los niveles intermedios. La vocal decide
  * cuánto abre (a > e, o > i, u), la sílaba tónica abre más y un hash del texto varía los picos.
  * Entre palabras la boca cierra un momento y la puntuación la deja cerrada más tiempo (un fin de
- * frase unos 440 ms, una coma unos 220 ms). Dura 55 ms por carácter, con cada coma contando como 3
- * y cada fin de frase como 7, y al menos 1200 ms; empieza y termina en 0 y nunca salta más de un
- * nivel por paso.
+ * frase unos 440 ms, una coma unos 220 ms; `...` o `?!` cuentan como un solo fin de frase, el punto
+ * de `3.14`, `mouth.ts` o `etc. y` no es pausa, y ninguna pausa pasa de unos 550 ms). Dura 55 ms
+ * por carácter, con cada coma contando como 3 y cada fin de frase como 7, y al menos 1200 ms;
+ * empieza y termina en 0 y nunca salta más de un nivel por paso.
  */
 export function syntheticMouthTimeline(text: string): { steps: MouthStep[]; durationMs: number } {
+  // Como la longitud en unidades UTF-16, con el peso de las pausas encima.
   let weight = text.length;
-  for (const c of text) weight += charWeight(c) - 1;
+  for (const w of charWeights(text)) weight += w - 1;
   const durationMs = Math.max(SYNTHETIC_MIN_MS, SYNTHETIC_MS_PER_CHAR * weight);
   const sylls = syllables(text, durationMs);
   const ticks = Math.floor(durationMs / SYNTHETIC_TICK_MS);

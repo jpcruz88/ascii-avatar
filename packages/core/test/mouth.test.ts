@@ -298,6 +298,46 @@ describe('syntheticMouthTimeline', () => {
     expect(closures[2]).toBeLessThan(420);
   });
 
+  /** La racha interior más larga con la boca cerrada. */
+  const longestInteriorClosure = (text: string): number => {
+    const { steps, durationMs } = syntheticMouthTimeline(text);
+    const lengths = runLengths(steps, durationMs);
+    let best = 0;
+    for (let i = 1; i < steps.length - 1; i++) if (steps[i]!.level === 0) best = Math.max(best, lengths[i]!);
+    return best;
+  };
+
+  it('los puntos suspensivos (... o …) cuentan como una sola pausa larga', () => {
+    const dots = 'Bueno... sigamos con esto';
+    const ellipsis = 'Bueno… sigamos con esto';
+    expect(syntheticMouthTimeline(dots).durationMs).toBe((dots.length - 3 + 7) * 55);
+    expect(syntheticMouthTimeline(ellipsis).durationMs).toBe((ellipsis.length - 1 + 7) * 55);
+    expect(Math.abs(longestInteriorClosure(dots) - longestInteriorClosure(ellipsis))).toBeLessThanOrEqual(80);
+    // ¿?! seguidos también son una sola pausa.
+    const both = 'De verdad?! Increíble todo';
+    expect(syntheticMouthTimeline(both).durationMs).toBe((both.length - 2 + 7) * 55);
+  });
+
+  it('un punto entre dígitos o en una abreviatura no es fin de frase', () => {
+    const pi = 'El valor es 3.14 más o menos';
+    expect(syntheticMouthTimeline(pi).durationMs).toBe(pi.length * 55);
+    for (const text of ['Usa p.ej. este archivo y listo', 'Revisa e.g. el archivo de prueba', 'Faltan pruebas, etc. y nada más']) {
+      const commas = (text.match(/,/g) ?? []).length;
+      expect(syntheticMouthTimeline(text).durationMs, text).toBe((text.length + commas * 2) * 55);
+    }
+    // Un archivo con extensión tampoco: 'mouth.ts' no hace pausa.
+    const file = 'Cambié mouth.ts para que abra mejor';
+    expect(syntheticMouthTimeline(file).durationMs).toBe(file.length * 55);
+    // Pero «etc.» al final de una frase seguido de mayúscula sí.
+    const end = 'Faltan pruebas etc. Mañana sigo';
+    expect(syntheticMouthTimeline(end).durationMs).toBe((end.length + 6) * 55);
+  });
+
+  it('ninguna pausa pasa de ~600 ms aunque se junte mucha puntuación', () => {
+    expect(longestInteriorClosure('Listo. ... ¡¡¡ ;;; — ¿Seguimos? ... !!! Vale')).toBeLessThanOrEqual(600);
+    expect(longestInteriorClosure('Uno, dos.   ,,, tres')).toBeLessThanOrEqual(600);
+  });
+
   it('la puntuación cierra la boca más tiempo que un simple espacio', () => {
     /** La racha interior más larga con la boca cerrada. */
     const longestClosure = (text: string): number => {
