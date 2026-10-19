@@ -87,6 +87,8 @@ avatar voz <nombre> [--voz <Nombre>] [--estilo "<texto>"]
                                          Muestra o cambia la voz y el estilo de voz de un agente
 avatar install-hook [--uninstall] [--settings <ruta>]
                                          Conecta (o desconecta) el avatar con Claude Code
+avatar exportar-web <nombre> [--out <carpeta>] [--cols <n>]
+                                         Exporta el agente para usarlo en una página web
 avatar help                              Muestra esta ayuda
 ```
 
@@ -403,6 +405,80 @@ En un Mac con Apple Silicon tarda alrededor de 1 minuto para los seis clips (uno
 
 Los detalles del generador (ángulos, cuadros por clip, salida JSON) están en [`tools/liveportrait/README.md`](tools/liveportrait/README.md).
 
+## Usarlo en una página web
+
+El mismo avatar, con el mismo motor que el panel (parpadeo, gestos, poses, clips y boca), se puede poner en cualquier página con un elemento `<ascii-avatar>`. Sin voz funciona con archivos estáticos (sirve GitHub Pages); la voz es opcional y va por un pequeño servidor tuyo.
+
+**1. Exporta el agente.**
+
+```sh
+avatar exportar-web ana                    # crea ./ana-web/
+avatar exportar-web ana --out sitio/ana --cols 100
+```
+
+La carpeta lleva solo `manifest.json` (nombre, voz, estilo de voz, columnas y filas, colores, lista de cuadros, poses y clips) y `frames.txt` (los cuadros ya convertidos a caracteres en modo grabado, tinta sobre papel). **Nunca lleva la foto original ni tu llave de Gemini.** Sí lleva la cara de la persona dibujada con caracteres, así que publícala solo con su permiso. `--cols` va de 20 a 500 (por defecto 120: la página escala la letra, así que conviene más definición que en el panel). Si la carpeta ya existe, solo se reescribe si es un paquete web anterior; si tiene otras cosas, el comando se detiene. Un agente con unos 120 cuadros (caras, poses y clips) a 120 columnas pesa alrededor de 1.2 MB (unos 100 KB comprimido con gzip, como lo sirven GitHub Pages y casi cualquier servidor).
+
+El repositorio ignora las carpetas `*-web/` para que no subas un agente real por accidente.
+
+**2. Ponlo en la página.** Copia junto a tu página el archivo `packages/web/dist/ascii-avatar.js` (se genera con `npm run build`) y la carpeta exportada:
+
+```html
+<script type="module" src="ascii-avatar.js"></script>
+
+<ascii-avatar src="ana-web/" style="width: 100%; max-width: 480px"></ascii-avatar>
+```
+
+La letra se calcula con el ancho del contenedor y las columnas del paquete (cada celda es alta el doble que ancha, como en la terminal), así que el avatar ocupa el ancho que le des. Se pinta en blanco y negro con los colores del paquete; puedes cambiarlos con las variables CSS `--ascii-avatar-tinta`, `--ascii-avatar-papel` y la fuente con `--ascii-avatar-fuente`. Cuando la pestaña está oculta deja de dibujar.
+
+**3. Hazlo hablar desde JavaScript.**
+
+```js
+const avatar = document.querySelector('ascii-avatar');
+avatar.pensar();                    // cara de pensar (alias: think())
+await avatar.decir('Listo. Las pruebas pasan.');   // resuelve al terminar (alias: say())
+avatar.callar();                    // corta lo que esté diciendo (alias: stop())
+
+avatar.addEventListener('listo', (e) => console.log('cargó', e.detail.agente));
+avatar.addEventListener('hablando', (e) => console.log('dice', e.detail.texto, 'con voz:', e.detail.voz));
+avatar.addEventListener('fin', () => console.log('terminó'));
+avatar.addEventListener('aviso', (e) => console.warn(e.detail.mensaje));
+```
+
+Igual que en el panel, dice un resumen corto del texto (sin código ni rutas) y elige la expresión por el contenido. Sin voz, la boca se mueve con el texto (boca sintética) y no suena nada.
+
+**4. Voz (opcional): el proxy.** La llave de Gemini nunca debe ir en una página: cualquiera que la abra podría copiarla. Por eso la voz pasa por un servidor pequeño que corre en tu máquina (o en tu servidor) y guarda la llave:
+
+```sh
+npm run build
+node tools/web-tts-proxy/server.mjs --origin http://localhost:8080
+# Proxy de voz en http://127.0.0.1:8787/tts para http://localhost:8080 · límite diario $5.52 MXN
+```
+
+```html
+<ascii-avatar src="ana-web/" tts-url="http://localhost:8787/tts"></ascii-avatar>
+```
+
+- Lee la llave de `GEMINI_API_KEY` o de `~/.ascii-avatar/secrets.json`; si no hay, responde con un mensaje que dice dónde ponerla.
+- Solo acepta peticiones de la página indicada en `--origin` (CORS restringido a ese origen; cualquier otro recibe 403). Escucha en `127.0.0.1` y el puerto 8787 por defecto (`--host`, `--port`, o `TTS_PROXY_ORIGIN`, `TTS_PROXY_HOST`, `TTS_PROXY_PORT`).
+- Limita el cuerpo (4 KB), el texto (500 caracteres) y las peticiones (20 por minuto por dirección).
+- Cada síntesis se anota en el mismo `~/.ascii-avatar/ledger.jsonl` que el panel y se hace cumplir el mismo límite diario de `config.json` (`limiteDiarioMxn` o `dailyLimitUsd`): el panel y la página comparten el gasto del día. Si no puede anotar un gasto, bloquea la voz hasta que lo reinicies.
+- Nunca escribe la llave ni el texto en su registro, y no reenvía los errores de Gemini.
+
+Si el proxy no responde o se alcanza el límite, el avatar avisa (evento `aviso`) y sigue con la boca sintética. Los navegadores solo dejan sonar audio después de un clic o una tecla del usuario: llama a `decir` desde un gesto (un botón, un formulario).
+
+No hay modo «llave en el navegador del visitante». La documentación de Gemini no garantiza que su API REST acepte llamadas directas desde una página (CORS) y pide expresamente no exponer la llave del lado del cliente y usar un servidor intermedio; sus tokens efímeros son solo para la Live API. El proxy es la única vía.
+
+**GitHub Pages.** Sube `ascii-avatar.js`, tu página y la carpeta exportada al repositorio de Pages; sin el proxy, el avatar gesticula y mueve la boca sin sonido. Para voz en un sitio público necesitas alojar el proxy en un servidor tuyo (con `--origin https://tu-usuario.github.io` y `--host 0.0.0.0`), sabiendo que cada visita puede gastar de tu límite diario.
+
+**Demo.** `examples/web/` es una página con un cuadro de texto para hacerlo hablar, con un agente de muestra sintético (una cara dibujada con figuras, `examples/web/muestra-web/`, que regenera `node examples/web/make-sample.mjs`):
+
+```sh
+npm run build
+node examples/web/serve.mjs          # http://localhost:8080/examples/web/
+```
+
+Para ver tu propio agente, expórtalo en la raíz del repositorio (`avatar exportar-web ana`, queda ignorado por git) y abre `http://localhost:8080/examples/web/?agente=../../ana-web/`. Con voz: levanta el proxy con `--origin http://localhost:8080` y agrega `&tts=http://localhost:8787/tts`.
+
 ## Experimento opcional: ver la definición y la estabilidad
 
 El repositorio incluye un experimento desechable que convierte las ocho caras a ASCII en los modos `glyphs` y `halfblock` y las alterna como lo haría el avatar. Sirve para juzgar a simple vista si la definición y el parecido te convencen, y para medir si las imágenes están alineadas. Se corre desde la raíz del repositorio:
@@ -496,15 +572,21 @@ El repositorio es un monorepo de npm workspaces en TypeScript estricto (ESM), co
 ```
 packages/core     fotos y caras a cuadros ASCII, animación, sincronía de boca, resumen hablado, registro de gasto, carpeta del agente
 packages/gemini   cliente de Gemini (imágenes y voz), prompts versionados, tarifas y modelos
-packages/cli      el comando avatar: create, panel, voice, install-hook, hook
+packages/cli      el comando avatar: create, panel, voice, install-hook, hook, exportar-web
+packages/web      el elemento <ascii-avatar> (se empaqueta en packages/web/dist/ascii-avatar.js)
+tools/web-tts-proxy  proxy de voz para la página web
+examples/web      demo web con un agente de muestra sintético
 docs/superpowers  especificación de diseño y plan de implementación
 ```
 
 ```sh
 npm install
-npm run build     # tsc -b
+npm run build     # tsc -b y el paquete web con esbuild
 npm test          # vitest run (usa Node ^22.12, ^24 o >=26)
+npm run test:e2e  # prueba de navegador de la demo con Playwright (construye antes)
 ```
+
+La primera vez, `npm run test:e2e` necesita el navegador de Playwright: `npx playwright install chromium`. El núcleo tiene una entrada para el navegador, `@ascii-avatar/core/browser` (animador, boca, WAV, resumen y expresión, sin Node ni sharp); una prueba recorre su grafo compilado para que siga así.
 
 Las pruebas no gastan dinero ni tocan tu carpeta real de datos ni tu `~/.claude`. Las pruebas en vivo contra la API real de Gemini están saltadas por defecto: se activan con `RUN_LIVE=1` y una `GEMINI_API_KEY` válida, y **cuestan dinero** (imágenes y voz reales). Úsalas solo cuando quieras confirmar que los ids de modelo y las tarifas siguen vigentes:
 
