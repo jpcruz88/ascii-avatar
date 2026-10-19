@@ -86,24 +86,31 @@ export function createGeminiImageClient(
   };
 }
 
+export interface GeneratedImage {
+  /** Bytes tal como los devolvió la API (en la práctica JPEG): no es un PNG garantizado. */
+  image: Buffer;
+  costUsd: number;
+  costEstimated: boolean;
+}
+
 /**
- * Genera una cara a partir de la foto. `image` puede venir en cualquier formato (en la práctica JPEG):
- * no es un PNG garantizado. El costo sale de los tokens de uso; si la
- * API no los informó, se devuelve la estimación con `costEstimated: true`.
+ * Una edición de pago con cualquier prompt (cara, grabado base o pose). El costo sale de los tokens
+ * de uso; si la API no los informó, se devuelve la estimación con `costEstimated: true`.
  */
-export async function generateFace(
-  client: ImageClient,
-  photo: Buffer,
-  mimeType: string,
-  face: FaceId,
-): Promise<{ image: Buffer; costUsd: number; costEstimated: boolean }> {
-  const { image, inputTokens, outputTokens } = await client.editImage({
-    prompt: FACE_PROMPTS[face],
-    image: photo,
-    mimeType,
-  });
+export async function generateImage(client: ImageClient, input: ImageEditInput): Promise<GeneratedImage> {
+  const { image, inputTokens, outputTokens } = await client.editImage(input);
   if (inputTokens === null || outputTokens === null) {
     return { image, costUsd: ESTIMATED_FACE_COST_USD, costEstimated: true };
   }
   return { image, costUsd: imageCostUsd(inputTokens, outputTokens), costEstimated: false };
+}
+
+/** Genera una cara a partir de la foto con su prompt de `FACE_PROMPTS` (estilo `foto`). */
+export function generateFace(
+  client: ImageClient,
+  photo: Buffer,
+  mimeType: string,
+  face: FaceId,
+): Promise<GeneratedImage> {
+  return generateImage(client, { prompt: FACE_PROMPTS[face], image: photo, mimeType });
 }

@@ -5,8 +5,10 @@ import {
   ESTIMATED_FACE_COST_USD,
   FACE_PROMPTS,
   generateFace,
+  generateImage,
   ImageRefusedError,
   imageCostUsd,
+  POSE_PROMPTS,
   type ImageClient,
 } from '../src/index.js';
 
@@ -87,6 +89,38 @@ describe('generateFace', () => {
     };
 
     await expect(generateFace(client, photo, 'image/png', 'sad')).rejects.toBe(boom);
+  });
+});
+
+describe('generateImage', () => {
+  it('pasa cualquier prompt e imagen al cliente y calcula el costo real', async () => {
+    const calls: Array<{ prompt: string; image: Buffer; mimeType: string }> = [];
+    const out = Buffer.from('salida');
+    const client: ImageClient = {
+      async editImage(input) {
+        calls.push(input);
+        return { image: out, inputTokens: 1300, outputTokens: 1120 };
+      },
+    };
+    const base = Buffer.from('grabado');
+
+    const result = await generateImage(client, { prompt: POSE_PROMPTS.nod_up, image: base, mimeType: 'image/png' });
+
+    expect(result.image).toBe(out);
+    expect(result.costUsd).toBeCloseTo(0.03555, 5);
+    expect(result.costEstimated).toBe(false);
+    expect(calls).toEqual([{ prompt: POSE_PROMPTS.nod_up, image: base, mimeType: 'image/png' }]);
+  });
+
+  it('si la API no informa el uso, estima el costo', async () => {
+    const client: ImageClient = {
+      async editImage() {
+        return { image: Buffer.from('x'), inputTokens: null, outputTokens: 5 };
+      },
+    };
+    const result = await generateImage(client, { prompt: 'p', image: Buffer.from('y'), mimeType: 'image/png' });
+    expect(result.costUsd).toBe(ESTIMATED_FACE_COST_USD);
+    expect(result.costEstimated).toBe(true);
   });
 });
 
