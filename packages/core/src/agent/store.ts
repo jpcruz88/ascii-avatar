@@ -3,7 +3,8 @@ import { join } from 'node:path';
 import { decodeImage } from '../ascii/decode.js';
 import { grabadoTone, imageToAscii } from '../ascii/convert.js';
 import type { AsciiFrame, AsciiMode, RawImage } from '../ascii/types.js';
-import { FACE_IDS, type FaceId } from '../faces.js';
+import { blendImages } from '../ascii/blend.js';
+import { FACE_IDS, MOUTH_BLENDS, type BlendFrameId, type FaceId, type FrameId } from '../faces.js';
 import { writeFileAtomic } from './atomic.js';
 
 /** Datos del agente que se guardan en `agent.json`. */
@@ -220,15 +221,16 @@ export function missingFaces(root: string, name: string): FaceId[] {
 }
 
 /**
- * Lee las 8 caras y las convierte a cuadros ASCII. Falla si falta alguna. En modo `grabado` el
- * estiramiento de contraste usa un solo rango calculado sobre las 8 caras, para que al alternar
- * entre ellas el tono no parpadee.
+ * Lee las 8 caras y las convierte a cuadros ASCII. Falla si falta alguna. Además sintetiza los
+ * cuadros intermedios de boca (`MOUTH_BLENDS`) mezclando píxel a píxel sus dos caras vecinas y los
+ * convierte igual que al resto. En modo `grabado` el estiramiento de contraste usa un solo rango
+ * calculado sobre las 8 caras, para que al alternar entre cuadros el tono no parpadee.
  */
 export async function loadAtlas(
   root: string,
   name: string,
   opts: { cols: number; mode: AsciiMode },
-): Promise<Record<FaceId, AsciiFrame>> {
+): Promise<Record<FrameId, AsciiFrame>> {
   const missing = missingFaces(root, name);
   if (missing.length > 0) {
     throw new Error(`Faltan caras del agente "${name}": ${missing.join(', ')}.`);
@@ -242,9 +244,12 @@ export async function loadAtlas(
     opts.mode === 'grabado'
       ? grabadoTone(FACE_IDS.map((id) => images[id]), opts.cols)
       : undefined;
-  const atlas = {} as Record<FaceId, AsciiFrame>;
-  for (const id of FACE_IDS) {
-    atlas[id] = imageToAscii(images[id], { ...opts, ...(tone === undefined ? {} : { tone }) });
+  const convert = (img: RawImage): AsciiFrame =>
+    imageToAscii(img, { ...opts, ...(tone === undefined ? {} : { tone }) });
+  const atlas = {} as Record<FrameId, AsciiFrame>;
+  for (const id of FACE_IDS) atlas[id] = convert(images[id]);
+  for (const [id, [a, b]] of Object.entries(MOUTH_BLENDS) as [BlendFrameId, readonly [FaceId, FaceId]][]) {
+    atlas[id] = convert(blendImages(images[a], images[b], 0.5));
   }
   return atlas;
 }

@@ -14,6 +14,7 @@ import {
   AgentNotFoundError,
   CorruptAgentError,
   FACE_IDS,
+  FRAME_IDS,
   InvalidAgentNameError,
   InvalidFaceImageError,
   InvalidPhotoError,
@@ -26,7 +27,9 @@ import {
   updateAgentVoice,
   validateAgentName,
   type FaceId,
+  type FrameId,
 } from '../src/index.js';
+import { blendImages } from '../src/ascii/blend.js';
 
 let root: string;
 
@@ -167,13 +170,33 @@ describe('saveFace: contrato PNG', () => {
 });
 
 describe('loadAtlas', () => {
-  it('devuelve 8 cuadros del ancho pedido', async () => {
+  it('devuelve las 8 caras y los 2 cuadros intermedios de boca, del ancho pedido', async () => {
     const photo = await png4x4(10);
     createAgent(root, 'luna', photo);
     for (const id of FACE_IDS) saveFace(root, 'luna', id, await png4x4(200));
     const atlas = await loadAtlas(root, 'luna', { cols: 4, mode: 'glyphs' });
-    expect(Object.keys(atlas).sort()).toEqual([...FACE_IDS].sort());
-    for (const id of FACE_IDS) expect(atlas[id].cols).toBe(4);
+    expect(FRAME_IDS).toHaveLength(10);
+    expect(Object.keys(atlas).sort()).toEqual([...FRAME_IDS].sort());
+    expect(Object.keys(atlas)).toEqual(expect.arrayContaining(['mouth_q1', 'mouth_q3']));
+    for (const id of FRAME_IDS) expect(atlas[id].cols).toBe(4);
+  });
+
+  it('los cuadros intermedios mezclan sus vecinas: distintos de ambas y entre sí', async () => {
+    createAgent(root, 'luna', await png4x4(10));
+    const gray: Partial<Record<FaceId, number>> = { neutral: 0, mouth_mid: 120, mouth_open: 240 };
+    for (const id of FACE_IDS) saveFace(root, 'luna', id, await png4x4(gray[id] ?? 200));
+    const atlas = await loadAtlas(root, 'luna', { cols: 4, mode: 'glyphs' });
+    const ch = (id: FrameId): string => atlas[id].cells[0]!.ch;
+    // Rampa ' .:-=+*#%@': 0 → ' ', 60 → ':', 120 → '=', 180 → '*', 240 → '%'.
+    expect([ch('neutral'), ch('mouth_q1'), ch('mouth_mid'), ch('mouth_q3'), ch('mouth_open')]).toEqual([
+      ' ',
+      ':',
+      '=',
+      '*',
+      '%',
+    ]);
+    expect(atlas.mouth_q1.cells[0]!.fg).toEqual({ r: 60, g: 60, b: 60 });
+    expect(atlas.mouth_q3.cells[0]!.fg).toEqual({ r: 180, g: 180, b: 180 });
   });
 
   it('falla en español listando las caras que faltan', async () => {
@@ -437,5 +460,43 @@ describe('loadAtlas en modo grabado', () => {
     const cell = (id: FaceId): string => atlas[id].cells[1 * 10 + 4]!.ch;
     expect(cell('neutral')).toBe(cell('smile'));
     expect(cell('neutral')).not.toBe(' ');
+  });
+
+  it('los cuadros intermedios usan el mismo modo y tono: la boca a medias da caracteres propios', async () => {
+    /** 100x100 blanco con una boca oscura de `alto` filas, centrada en la fila 60. */
+    function boca(alto: number): Promise<Buffer> {
+      const data = Buffer.alloc(100 * 100 * 3, 255);
+      for (let y = 20; y < 30; y++) data.fill(0, (y * 100 + 30) * 3, (y * 100 + 70) * 3); // cejas
+      for (let y = 60 - alto / 2; y < 60 + alto / 2; y++) data.fill(0, (y * 100 + 30) * 3, (y * 100 + 70) * 3);
+      return sharp(data, { raw: { width: 100, height: 100, channels: 3 } }).png().toBuffer();
+    }
+    createAgent(root, 'luna', await png4x4(10));
+    const alto: Partial<Record<FaceId, number>> = { neutral: 4, mouth_mid: 16, mouth_open: 32 };
+    for (const id of FACE_IDS) saveFace(root, 'luna', id, await boca(alto[id] ?? 4));
+    const atlas = await loadAtlas(root, 'luna', { cols: 20, mode: 'grabado' });
+    const text = (id: FrameId): string => atlas[id].cells.map((c) => c.ch).join('');
+    const order: FrameId[] = ['neutral', 'mouth_q1', 'mouth_mid', 'mouth_q3', 'mouth_open'];
+    const texts = order.map(text);
+    expect(new Set(texts).size).toBe(5);
+    expect(atlas.mouth_q1.cells[0]!.bg).toEqual(atlas.neutral.cells[0]!.bg);
+  });
+});
+
+describe('blendImages', () => {
+  const img = (w: number, h: number, v: number) => ({ width: w, height: h, data: new Uint8Array(w * h * 4).fill(v) });
+
+  it('mezcla píxel a píxel con el peso pedido, redondeando', () => {
+    const out = blendImages(img(2, 2, 0), img(2, 2, 255), 0.5);
+    expect(out.width).toBe(2);
+    expect(out.height).toBe(2);
+    expect([...out.data]).toEqual(new Array(16).fill(128));
+    expect([...blendImages(img(1, 1, 100), img(1, 1, 200), 0.25).data]).toEqual([125, 125, 125, 125]);
+  });
+
+  it('si los tamaños difieren, muestrea la segunda al tamaño de la primera', () => {
+    const out = blendImages(img(4, 4, 0), img(2, 2, 200), 0.5);
+    expect(out.width).toBe(4);
+    expect(out.height).toBe(4);
+    expect([...out.data].every((v) => v === 100)).toBe(true);
   });
 });
