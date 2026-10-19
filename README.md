@@ -190,8 +190,11 @@ avatar voice off
 
 El comando recuerda la última opción en `~/.ascii-avatar/config.json` y, si hay un panel abierto, le avisa al instante. También puedes alternarla con la tecla `v` dentro del panel. Por defecto la voz está apagada.
 
-- Con la voz encendida, cada respuesta se convierte en un resumen corto (se quitan código, rutas y tablas), se sintetiza con Gemini, se reproduce con `afplay` y la boca se mueve según el volumen del audio (cerrada, media, abierta).
+- Con la voz encendida, cada respuesta se convierte en un resumen corto (se quitan código, rutas y tablas), se sintetiza con Gemini, se reproduce con `afplay` y la boca se mueve según el volumen del audio.
 - Con la voz apagada, la boca se mueve igual con el texto del resumen, pero no suena nada. La respuesta sigue en texto en tu terminal.
+- Al hablar, el avatar muestra primero la expresión medio segundo y luego mueve la boca; el audio arranca justo en ese momento, así boca y voz van juntas.
+
+**Cómo se mueve la boca.** La boca tiene cinco aperturas, de 0 (cerrada) a 4 (abierta). Tres son caras del paquete (`neutral`, `mouth_mid`, `mouth_open`) y las otras dos (`mouth_q1` y `mouth_q3`) se sintetizan al abrir el panel mezclando a partes iguales las dos caras vecinas, sin imágenes nuevas ni gasto. Con voz, el volumen se mide cada 20 ms, se compara con el percentil 95 del propio audio (lo muy bajo cuenta como silencio), se suaviza para que la boca abra rápido (unos 25 ms) y cierre algo más despacio (unos 90 ms), y se pasa a las cinco aperturas con histéresis: la boca recorre los niveles intermedios de uno en uno, no tiembla con cambios mínimos de volumen, un clic suelto apenas la entreabre y, antes de cambiar de dirección, mantiene cada nivel al menos 60 ms. La boca se adelanta unos 60 ms al audio, como cuando alguien habla de verdad. Sin voz, cada sílaba aproximada del texto dibuja un arco que abre y cierra pasando por las aperturas intermedias: la vocal decide cuánto abre (la *a* más que la *e* o la *o*, y estas más que la *i* o la *u*), la sílaba tónica abre más, la boca cierra un momento entre palabras y la puntuación la deja cerrada más tiempo. Mientras habla, el panel dibuja a unos 24 cuadros por segundo; en reposo baja a unos 12 y solo redibuja cuando cambia la cara o el pie.
 - La voz necesita la llave de Gemini y macOS. Sin ellas el avatar sigue funcionando solo con gestos y lo avisa en el pie.
 
 ### Voz y estilo de cada agente
@@ -260,7 +263,7 @@ No tienes que usar Gemini para las imágenes: puedes hacer las tuyas con cualqui
 
 **Contrato de encuadre.** Las ocho imágenes deben tener la misma cámara, la misma pose, la misma luz, el mismo encuadre y el mismo fondo. Solo cambia la cara. Y todas deben tener exactamente el mismo tamaño en píxeles (por ejemplo 1024 por 1024). Si el encuadre se mueve entre imágenes, el ASCII "tiembla" al cambiar de cara.
 
-**Los ocho nombres exactos** (`FACE_IDS`), uno por archivo PNG:
+**Los ocho nombres exactos** (`FACE_IDS`), uno por archivo PNG (las aperturas intermedias de la boca no son archivos: el panel las sintetiza mezclando `neutral`, `mouth_mid` y `mouth_open`):
 
 | Archivo | Qué muestra |
 | --- | --- |
