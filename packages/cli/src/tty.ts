@@ -174,10 +174,16 @@ export function runTty(o: TtyOptions): Promise<void> {
         lastFooter = footer;
       }
     };
+    // Hora del próximo cuadro según el reloj, no «un intervalo después de terminar el dibujo»: así el
+    // tiempo de dibujar no se suma a cada cuadro y 24 fps son 24 de verdad. Si un dibujo se atrasa
+    // más de un cuadro, se sigue desde ahora en vez de apilar cuadros para recuperar el atraso.
+    let nextAt = performance.now();
     const tick = (): void => {
       draw();
       if (restored) return;
-      timer = setTimeout(tick, frameIntervalMs(o.speaking?.() ?? false));
+      const now = performance.now();
+      nextAt = Math.max(nextAt + frameIntervalMs(o.speaking?.() ?? false), now);
+      timer = setTimeout(tick, Math.max(0, nextAt - now));
     };
 
     const restore = (): void => {

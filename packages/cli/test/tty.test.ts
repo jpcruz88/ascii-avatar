@@ -157,6 +157,52 @@ describe('ritmo de dibujo', () => {
     await done;
   });
 
+  it('corrige la deriva: con un dibujo lento de 30 ms sigue a ~24 cuadros por segundo', async () => {
+    vi.useFakeTimers();
+    const stdout = new FakeStdout();
+    const stdin = new FakeStdin();
+    const t0 = performance.now();
+    const at: number[] = [];
+    const slow = (): AsciiFrame => {
+      at.push(performance.now() - t0);
+      vi.advanceTimersByTime(30); // el dibujo tarda 30 ms del reloj
+      return at.length % 2 === 0 ? frame : other;
+    };
+    const done = runTty({ ...options(stdout, stdin), speaking: () => true, getFrame: slow });
+    vi.advanceTimersByTime(1000);
+    const inFirstSecond = at.filter((t) => t < 1000).length;
+    expect(inFirstSecond).toBeGreaterThanOrEqual(23);
+    expect(inFirstSecond).toBeLessThanOrEqual(25);
+    // Cada cuadro empieza a su hora (múltiplos de ~42 ms), no 42 ms después de terminar el anterior.
+    for (let i = 1; i < at.length; i++) expect(at[i]! - at[i - 1]!).toBeLessThanOrEqual(43);
+    stdin.emit('data', Buffer.from('q'));
+    await done;
+  });
+
+  it('si un dibujo tarda más que un cuadro, no se apilan cuadros para recuperar el atraso', async () => {
+    vi.useFakeTimers();
+    const stdout = new FakeStdout();
+    const stdin = new FakeStdin();
+    const t0 = performance.now();
+    const at: number[] = [];
+    const done = runTty({
+      ...options(stdout, stdin),
+      speaking: () => true,
+      getFrame: () => {
+        at.push(performance.now() - t0);
+        // Solo el segundo dibujo es lentísimo (300 ms).
+        if (at.length === 2) vi.advanceTimersByTime(300);
+        return frame;
+      },
+    });
+    vi.advanceTimersByTime(600);
+    // Tras el dibujo lento el siguiente sale enseguida y luego retoma el ritmo normal.
+    const after = at.slice(2, 5);
+    for (let i = 1; i < after.length; i++) expect(after[i]! - after[i - 1]!).toBeGreaterThanOrEqual(41);
+    stdin.emit('data', Buffer.from('q'));
+    await done;
+  });
+
   it('en reposo baja a unas 12 veces por segundo', async () => {
     vi.useFakeTimers();
     const stdout = new FakeStdout();
