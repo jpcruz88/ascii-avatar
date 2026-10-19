@@ -147,6 +147,16 @@ describe('loadAtlas con poses y clips', () => {
     expect(atlasMotion(atlas)).toEqual({ poses: ['tilt_right', 'look_left'], clips: { nod: 3 } });
   });
 
+  it('cada pose trae su cuadro de regreso ease:<pose>, mezcla a medias con neutral', async () => {
+    await agentWithFaces((id) => solid(id === 'neutral' ? 240 : 200));
+    savePoses(root, 'luna', { look_left: await solid(0) });
+    const atlas = await loadAtlas(root, 'luna', { cols: 4, mode: 'glyphs', cache: false });
+    const ease = atlas['ease:look_left']!;
+    expect(ease.cols).toBe(4);
+    expect(ease.cells[0]!.fg).toEqual({ r: 120, g: 120, b: 120 });
+    expect(atlas['ease:look_right']).toBeUndefined();
+  });
+
   it('una pose de otro tamaño que las caras, o dañada, se descarta sin fallar', async () => {
     await agentWithFaces();
     mkdirSync(join(dir(), 'poses'), { recursive: true });

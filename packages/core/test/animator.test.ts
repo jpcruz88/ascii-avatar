@@ -470,8 +470,13 @@ describe('Animator pensando con gestos', () => {
     const a = new Animator({ rng: zero, motion: { poses: ['look_left'], clips: { think: 24 } } });
     a.thinking(0);
     a.idle(100);
-    expect(a.frame(100)).toBe('neutral');
-    expect(a.frame(4100)).toBe('pose:look_left');
+    // A los 100 ms se veía el cuadro 2 del clip de pensar: vuelve por el 1 y el 0 (83 ms).
+    expect(a.frame(100)).toBe('clip:think:1');
+    expect(a.frame(150)).toBe('clip:think:0');
+    expect(a.frame(200)).toBe('neutral');
+    // El próximo gesto de reposo se agenda desde el fin del regreso.
+    expect(a.frame(4183)).toBe('neutral');
+    expect(a.frame(4184)).toBe('pose:look_left');
   });
 });
 
@@ -564,5 +569,144 @@ describe('Animator hablando con gestos', () => {
     expect(a.frame(4700)).toBe('neutral');
     expect(a.frame(8699)).toBe('neutral');
     expect(a.frame(8700)).toBe('pose:look_left');
+  });
+});
+
+describe('Animator: interrumpir un gesto no hace saltar la cabeza', () => {
+  /**
+   * Cuadros vistos cada 5 ms en [from, to), sin repetir los consecutivos iguales. `before` es el
+   * cuadro que se veía justo antes de la interrupción (va primero, para ver el salto si lo hay).
+   */
+  function trace(a: Animator, from: number, to: number, before?: string): string[] {
+    const out: string[] = before === undefined ? [] : [before];
+    for (let t = from; t < to; t += 5) {
+      const f = a.frame(t);
+      if (out.at(-1) !== f) out.push(f);
+    }
+    return out;
+  }
+
+  /**
+   * Desde un cuadro de clip distinto del 0 solo se pasa a otro cuadro del mismo clip; desde una
+   * pose, solo a su cuadro de regreso (`ease:`) o a un clip. Nunca directo a una cara de frente.
+   */
+  function expectNoSnap(frames: string[]): void {
+    for (let i = 1; i < frames.length; i++) {
+      const prev = frames[i - 1]!;
+      const cur = frames[i]!;
+      const clip = /^clip:([a-z_]+):(\d+)$/.exec(prev);
+      if (clip !== null && clip[2] !== '0') {
+        expect(cur, `${prev} → ${cur}`).toMatch(new RegExp(`^clip:${clip[1]}:\\d+$`));
+      }
+      const pose = /^pose:([a-z_]+)$/.exec(prev);
+      if (pose !== null) expect(cur, `${prev} → ${cur}`).toMatch(new RegExp(`^(ease:${pose[1]}|clip:.+)$`));
+    }
+  }
+
+  /** Reposo con un solo gesto posible: el clip `turn_left` de 16 cuadros, de 4000 a ~4667. */
+  const turning = (): Animator => new Animator({ rng: zero, motion: { poses: [], clips: { turn_left: 16 } } });
+
+  it('say a mitad de un clip: el clip vuelve hacia el cuadro 0 y luego viene la expresión', () => {
+    const a = turning();
+    expect(a.frame(mid(4000, 7))).toBe('clip:turn_left:7');
+    const t = mid(4000, 7);
+    a.say(t, speech(OPEN_THEN_CLOSED, 1200, 'smile'));
+    const frames = trace(a, t, t + 600, 'clip:turn_left:7');
+    expectNoSnap(frames);
+    expect(frames).toContain('clip:turn_left:0');
+    expect(frames).toContain('smile');
+    // El regreso cabe en el avance: la boca empieza a su hora, como siempre.
+    expect(a.frame(t + 500)).toBe('mouth_open');
+  });
+
+  it('con la expresión neutral tampoco salta: pasa por el cuadro 0 del clip', () => {
+    const a = turning();
+    const t = mid(4000, 7);
+    const before = a.frame(t);
+    a.say(t, speech(OPEN_THEN_CLOSED, 1200, 'neutral'));
+    const frames = trace(a, t, t + 600, before);
+    expectNoSnap(frames);
+    expect(frames).toContain('clip:turn_left:0');
+    expect(frames.indexOf('clip:turn_left:0')).toBeLessThan(frames.indexOf('neutral'));
+  });
+
+  it('un regreso largo (cuadro 100 de 120) se acelera para caber en el avance de 500 ms', () => {
+    const a = new Animator({ rng: zero, motion: { poses: [], clips: { tilt_left: 120 } } });
+    const t = mid(4000, 100);
+    expect(a.frame(t)).toBe('clip:tilt_left:100');
+    a.say(t, speech(OPEN_THEN_CLOSED, 1200));
+    const frames = trace(a, t, t + 500, 'clip:tilt_left:100');
+    expectNoSnap(frames);
+    expect(frames).toContain('clip:tilt_left:0');
+    expect(a.frame(t + 499)).toBe('smile');
+  });
+
+  it('thinking a mitad de un clip de reposo: vuelve a neutral antes de empezar a pensar', () => {
+    const a = new Animator({ rng: zero, motion: { poses: [], clips: { turn_left: 16, think: 24 } } });
+    // Con think disponible el único gesto de reposo sigue siendo turn_left (think no es de reposo).
+    const t = mid(4000, 7);
+    expect(a.frame(t)).toBe('clip:turn_left:7');
+    a.thinking(t);
+    const frames = trace(a, t, t + 700, 'clip:turn_left:7');
+    expectNoSnap(frames);
+    expect(frames).toContain('clip:turn_left:0');
+    expect(frames.indexOf('clip:turn_left:0')).toBeLessThan(frames.indexOf('clip:think:0'));
+  });
+
+  it('un segundo thinking mientras ya piensa no reinicia el clip de pensar', () => {
+    const a = new Animator({ rng: zero, motion: { poses: [], clips: { think: 24 } } });
+    a.thinking(0);
+    expect(a.frame(mid(0, 7))).toBe('clip:think:7');
+    a.thinking(mid(0, 7));
+    expect(a.frame(mid(0, 7))).toBe('clip:think:7');
+    expect(a.frame(mid(0, 8))).toBe('clip:think:8');
+  });
+
+  it('say durante una pose sostenida la suelta con su cuadro de regreso, sin saltar', () => {
+    const a = new Animator({ rng: zero, motion: { poses: ['look_left'], clips: {} } });
+    expect(a.frame(4400)).toBe('pose:look_left');
+    a.say(4400, speech(OPEN_THEN_CLOSED, 1200, 'neutral'));
+    const frames = trace(a, 4400, 5000, 'pose:look_left');
+    expectNoSnap(frames);
+    expect(frames.slice(0, 3)).toEqual(['pose:look_left', 'ease:look_left', 'neutral']);
+  });
+
+  it('una pose con su clip se suelta por el clip, desde la mitad hacia el cuadro 0', () => {
+    // La pose suave sale al pensar (sin clip think, se sostiene de inmediato).
+    const b = new Animator({ rng: zero, motion: { poses: ['turn_right'], clips: { turn_right: 16 } } });
+    b.thinking(0);
+    expect(b.frame(100)).toBe('pose:turn_right');
+    b.say(100, speech(OPEN_THEN_CLOSED, 1200));
+    const frames = trace(b, 100, 700, 'pose:turn_right');
+    expectNoSnap(frames);
+    expect(frames[1]).toBe('clip:turn_right:8');
+    expect(frames).toContain('clip:turn_right:0');
+  });
+
+  it('un say nuevo a mitad de un asentimiento del habla anterior tampoco salta', () => {
+    const a = new Animator({ rng: zero, motion: { poses: [], clips: { nod: 8 } } });
+    a.say(0, speech([{ tMs: 0, level: 3 }, { tMs: 300, level: 0 }, { tMs: 700, level: 2 }, { tMs: 1000, level: 0 }], 1200));
+    const t = mid(740, 4);
+    expect(a.frame(t)).toBe('clip:nod:4');
+    a.say(t, speech(OPEN_THEN_CLOSED, 1200, 'sad'));
+    const frames = trace(a, t, t + 600, 'clip:nod:4');
+    expectNoSnap(frames);
+    expect(frames).toContain('sad');
+  });
+
+  it('idle a mitad de un clip también regresa por el clip', () => {
+    const a = turning();
+    const t = mid(4000, 7);
+    const before = a.frame(t);
+    a.idle(t);
+    expectNoSnap(trace(a, t, t + 600, before));
+  });
+
+  it('el regreso pide 24 fps', () => {
+    const a = new Animator({ rng: zero, motion: { poses: [], clips: { turn_left: 16, think: 24 } } });
+    const t = mid(4000, 7);
+    a.frame(t);
+    a.thinking(t);
+    expect(a.fastFrames(t + 10)).toBe(true);
   });
 });

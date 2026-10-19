@@ -2,6 +2,7 @@ import type { MouthLevel, MouthStep } from '../audio/mouth.js';
 import {
   MOUTH_FRAMES,
   clipFrameId,
+  easeFrameId,
   poseFrameId,
   type ClipId,
   type ExpressionId,
@@ -50,6 +51,22 @@ const MIN_PINGPONG_PEAK = 3;
 const SPEECH_NOD_WEIGHT = 0.7;
 /** El panel sube a 24 fps un poco antes de que empiece un clip, para no perder su primer cuadro. */
 const FAST_LOOKAHEAD_MS = 100;
+/**
+ * Al interrumpir un gesto, la cabeza vuelve a neutral en a lo sumo esto: cabe en el avance de la
+ * expresión (`SPEECH_LEAD_IN_MS`), así la boca empieza a su hora aunque se interrumpa un gesto.
+ */
+const RETURN_MAX_MS = 480;
+/** Cuadros que dura el regreso de una pose sin clip (su cuadro `ease:`). */
+const EASE_FRAMES = 2;
+/** Clip con el que se suelta cada pose (de la mitad del clip hacia el cuadro 0), si el agente lo tiene. */
+const POSE_CLIP: Partial<Record<PoseId, ClipId>> = {
+  tilt_left: 'tilt_left',
+  tilt_right: 'tilt_right',
+  turn_left: 'turn_left',
+  turn_right: 'turn_right',
+  nod_up: 'nod',
+  nod_down: 'nod',
+};
 
 export interface AnimatorOptions {
   /** Fuente de números en [0, 1). Por defecto `Math.random`; en pruebas se inyecta una fija. */
@@ -66,8 +83,14 @@ export interface SayOptions {
 
 type RestMode = keyof typeof BLINK_EVERY_MS;
 
-/** Un tramo de gesto: cuadros de un clip (en orden de reproducción) o una pose sostenida. */
-type Segment = { kind: 'clip'; clip: ClipId; frames: number[] } | { kind: 'pose'; pose: PoseId; ms: number };
+/**
+ * Un tramo de gesto: cuadros de un clip (en orden de reproducción), una pose sostenida o el cuadro
+ * de regreso de una pose (`ease:`, la pose mezclada con neutral).
+ */
+type Segment =
+  | { kind: 'clip'; clip: ClipId; frames: number[] }
+  | { kind: 'pose'; pose: PoseId; ms: number }
+  | { kind: 'ease'; pose: PoseId; ms: number };
 
 interface Gesture {
   /** Identidad del gesto, para no repetir el mismo dos veces seguidas. */
@@ -92,7 +115,14 @@ type Rest = {
   active: Active | null;
   lastKey: string | null;
 };
-type Speech = { kind: 'speech'; startMs: number; say: SayOptions; gestures: Active[] };
+type Speech = {
+  kind: 'speech';
+  startMs: number;
+  say: SayOptions;
+  /** Regreso a neutral del gesto que se interrumpió al empezar a hablar (dentro del avance). */
+  intro: Active | null;
+  gestures: Active[];
+};
 type State = Rest | Speech;
 
 interface Candidate {
@@ -120,6 +150,10 @@ const allFrames = (n: number): number[] => Array.from({ length: n }, (_, i) => i
  * - Hablando, la boca sigue de frente; en una pausa de la boca de 350 ms o más entre frases asiente
  *   (o ladea) con un clip, como mucho una vez cada 3 s. Si el clip no cabe en la pausa, hace un
  *   tramo de ida y vuelta de sus primeros cuadros, que termina en neutral.
+ * - Si llega `say`, `thinking` o `idle` a mitad de un gesto, la cabeza no salta: un clip vuelve
+ *   hacia su cuadro 0 (acelerado si hace falta, en a lo sumo 480 ms, dentro del avance de la
+ *   expresión) y una pose se suelta por su clip (de la mitad hacia el 0) o por su cuadro `ease:`.
+ *   Un `thinking` mientras ya piensa no reinicia nada.
  * - Nunca parpadea durante un gesto (los cuadros de un clip ya traen sus ojos): un parpadeo que cae
  *   dentro se hace al terminar, y un gesto que empieza durante un parpadeo espera a que acabe.
  * - Los clips van a 24 cuadros por segundo; `fastFrames` avisa cuándo el panel debe dibujar rápido.
@@ -136,21 +170,25 @@ export class Animator {
     this.state = this.rest('idle', 0);
   }
 
-  /** El usuario envió un mensaje; se ignora si la respuesta ya está sonando. */
+  /** El usuario envió un mensaje; se ignora si la respuesta ya está sonando o si ya está pensando. */
   thinking(nowMs: number): void {
     const t = this.tick(nowMs);
     if (this.state.kind === 'speech' && t < this.speechEndMs(this.state)) return;
-    this.state = this.rest('thinking', t);
+    this.frame(t);
+    if (this.state.kind === 'rest' && this.state.mode === 'thinking') return;
+    this.state = this.rest('thinking', t, this.interruption(t));
   }
 
   /** Llegó la respuesta; reemplaza cualquier habla en curso. */
   say(nowMs: number, say: SayOptions): void {
     const startMs = this.tick(nowMs);
-    this.state = { kind: 'speech', startMs, say, gestures: this.speechGestures(startMs, say) };
+    const intro = this.interruption(startMs);
+    this.state = { kind: 'speech', startMs, say, intro, gestures: this.speechGestures(startMs, say) };
   }
 
   idle(nowMs: number): void {
-    this.state = this.rest('idle', this.tick(nowMs));
+    const t = this.tick(nowMs);
+    this.state = this.rest('idle', t, this.interruption(t));
   }
 
   /** Si la boca se está moviendo (desde `say` hasta que termina el audio): el panel dibuja más rápido. */
@@ -169,7 +207,7 @@ export class Animator {
     this.frame(t);
     const state = this.state;
     if (state.kind === 'speech') return false;
-    if (state.active !== null) return this.segmentAt(state.active, t)?.kind === 'clip';
+    if (state.active !== null) return (this.segmentAt(state.active, t)?.kind ?? 'pose') !== 'pose';
     const next = state.next;
     return next !== null && next.gesture.segments[0]?.kind === 'clip' && next.atMs - t <= FAST_LOOKAHEAD_MS;
   }
@@ -201,6 +239,8 @@ export class Animator {
   private speechFace(speech: Speech, t: number): FrameId {
     const { startMs, say } = speech;
     const elapsed = t - startMs - LEAD_IN_MS;
+    const intro = speech.intro;
+    if (intro !== null && t >= intro.atMs && t < intro.endMs) return this.gestureFrame(intro, t);
     if (elapsed < 0 || t >= this.speechEndMs(speech)) return say.expression;
     for (const g of speech.gestures) {
       if (t >= g.atMs && t < g.endMs) return this.gestureFrame(g, t);
@@ -249,9 +289,51 @@ export class Animator {
     return out;
   }
 
-  private rest(mode: RestMode, sinceMs: number): Rest {
-    const nextBlinkMs = sinceMs + this.blinkInterval(mode);
-    return { kind: 'rest', mode, nextBlinkMs, next: this.plan(mode, sinceMs, null), active: null, lastKey: null };
+  /** Reposo desde `sinceMs`; con `intro`, primero el regreso a neutral del gesto interrumpido. */
+  private rest(mode: RestMode, sinceMs: number, intro: Active | null = null): Rest {
+    let nextBlinkMs = sinceMs + this.blinkInterval(mode);
+    if (intro === null) {
+      return { kind: 'rest', mode, nextBlinkMs, next: this.plan(mode, sinceMs, null), active: null, lastKey: null };
+    }
+    if (nextBlinkMs < intro.endMs) nextBlinkMs = intro.endMs;
+    return { kind: 'rest', mode, nextBlinkMs, next: null, active: intro, lastKey: null };
+  }
+
+  /** El gesto que se ve en `t` (ya puesto al día), o `null`. */
+  private visibleGesture(t: number): Active | null {
+    this.frame(t);
+    const s = this.state;
+    const covers = (g: Active | null): g is Active => g !== null && t >= g.atMs && t < g.endMs;
+    if (s.kind === 'rest') return covers(s.active) ? s.active : null;
+    if (covers(s.intro)) return s.intro;
+    return s.gestures.find(covers) ?? null;
+  }
+
+  /**
+   * Regreso a neutral si en `t` se ve un gesto: un clip vuelve desde su cuadro actual hasta el 0;
+   * una pose se suelta por su clip (de la mitad hacia el 0) o por su cuadro `ease:`. Dura a lo
+   * sumo `RETURN_MAX_MS` (se saltan cuadros si hace falta). `null` si no hace falta regresar.
+   */
+  private interruption(t: number): Active | null {
+    const g = this.visibleGesture(t);
+    if (g === null) return null;
+    const at = this.locate(g, t);
+    if (at === undefined) return null;
+    let segment: Segment | null = null;
+    if (at.seg.kind === 'clip') {
+      const n = at.seg.frames[at.index]!;
+      if (n > 0) segment = { kind: 'clip', clip: at.seg.clip, frames: backTo0(n - 1) };
+    } else if (at.seg.kind === 'pose') {
+      const clip = POSE_CLIP[at.seg.pose];
+      const count = clip === undefined ? 0 : (this.motion.clips[clip] ?? 0);
+      segment =
+        clip !== undefined && count >= 2
+          ? { kind: 'clip', clip, frames: backTo0(Math.floor(count / 2)) }
+          : { kind: 'ease', pose: at.seg.pose, ms: EASE_FRAMES * CLIP_FRAME_MS };
+    }
+    if (segment === null) return null;
+    const gesture: Gesture = { key: 'return', segments: [segment] };
+    return { atMs: t, endMs: t + gestureMs(gesture), gesture };
   }
 
   private blinkInterval(mode: RestMode): number {
@@ -319,7 +401,8 @@ export class Animator {
     const think = this.motion.clips.think ?? 0;
     const soft = SOFT_POSES.filter((p) => this.motion.poses.includes(p));
     if (think === 0 && soft.length === 0) return null;
-    const atMs = lastKey === null ? fromMs : fromMs + this.between(THINK_PAUSE_MS);
+    // El primero va en el acto (también tras regresar de un gesto interrumpido); luego, con pausa.
+    const atMs = lastKey === null || lastKey === 'return' ? fromMs : fromMs + this.between(THINK_PAUSE_MS);
     const segments: Segment[] = [];
     if (think > 0) segments.push({ kind: 'clip', clip: 'think', frames: allFrames(think) });
     if (soft.length > 0) {
@@ -363,23 +446,43 @@ export class Animator {
     }
   }
 
-  private segmentAt(g: Active, t: number): { kind: Segment['kind']; frame: FrameId } | undefined {
+  /** Tramo del gesto que se ve en `t` y, si es un clip, la posición en su lista de cuadros. */
+  private locate(g: Active, t: number): { seg: Segment; index: number } | undefined {
     let from = g.atMs;
-    for (const s of g.gesture.segments) {
-      const ms = segmentMs(s);
+    for (const seg of g.gesture.segments) {
+      const ms = segmentMs(seg);
       if (t < from + ms) {
-        if (s.kind === 'pose') return { kind: 'pose', frame: poseFrameId(s.pose) };
-        const i = Math.min(s.frames.length - 1, Math.max(0, Math.floor((t - from) / CLIP_FRAME_MS)));
-        return { kind: 'clip', frame: clipFrameId(s.clip, s.frames[i]!) };
+        const index =
+          seg.kind === 'clip' ? Math.min(seg.frames.length - 1, Math.max(0, Math.floor((t - from) / CLIP_FRAME_MS))) : 0;
+        return { seg, index };
       }
       from += ms;
     }
     return undefined;
   }
 
+  private segmentAt(g: Active, t: number): { kind: Segment['kind']; frame: FrameId } | undefined {
+    const at = this.locate(g, t);
+    if (at === undefined) return undefined;
+    const { seg, index } = at;
+    if (seg.kind === 'clip') return { kind: 'clip', frame: clipFrameId(seg.clip, seg.frames[index]!) };
+    return { kind: seg.kind, frame: seg.kind === 'pose' ? poseFrameId(seg.pose) : easeFrameId(seg.pose) };
+  }
+
   private gestureFrame(g: Active, t: number): FrameId {
     return this.segmentAt(g, t)?.frame ?? 'neutral';
   }
+}
+
+/**
+ * Cuadros de `from` hasta 0 (de mayor a menor). Si no caben en `RETURN_MAX_MS` a 24 fps, se toman
+ * cuadros repartidos por igual, siempre con el primero y el 0.
+ */
+function backTo0(from: number): number[] {
+  const path = allFrames(from + 1).reverse();
+  const room = Math.max(2, Math.floor(RETURN_MAX_MS / CLIP_FRAME_MS));
+  if (path.length <= room) return path;
+  return Array.from({ length: room }, (_, i) => path[Math.round((i * (path.length - 1)) / (room - 1))]!);
 }
 
 /**

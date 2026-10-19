@@ -59,12 +59,18 @@ export type ClipId = (typeof CLIP_IDS)[number];
 
 export type PoseFrameId = `pose:${PoseId}`;
 export type ClipFrameId = `clip:${ClipId}:${number}`;
+/**
+ * Cuadro de regreso de una pose: la pose mezclada a partes iguales con `neutral`. Se sintetiza al
+ * cargar (no es un archivo) y sirve para soltar una pose sin saltar de golpe a la cara de frente.
+ */
+export type EaseFrameId = `ease:${PoseId}`;
 
 export const poseFrameId = (id: PoseId): PoseFrameId => `pose:${id}`;
 export const clipFrameId = (clip: ClipId, index: number): ClipFrameId => `clip:${clip}:${index}`;
+export const easeFrameId = (id: PoseId): EaseFrameId => `ease:${id}`;
 
 /** Todo lo que el panel puede dibujar: los cuadros de base y, si el agente los tiene, poses y clips. */
-export type FrameId = BaseFrameId | PoseFrameId | ClipFrameId;
+export type FrameId = BaseFrameId | PoseFrameId | ClipFrameId | EaseFrameId;
 
 /** Poses y clips (con su número de cuadros) que tiene un agente. */
 export interface Motion {

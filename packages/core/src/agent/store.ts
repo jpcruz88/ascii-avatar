@@ -11,11 +11,13 @@ import {
   MOUTH_BLENDS,
   POSE_IDS,
   clipFrameId,
+  easeFrameId,
   poseFrameId,
   type BaseFrameId,
   type BlendFrameId,
   type ClipFrameId,
   type ClipId,
+  type EaseFrameId,
   type FaceId,
   type Motion,
   type PoseFrameId,
@@ -286,7 +288,8 @@ export function saveClips(root: string, name: string, clips: Partial<Record<Clip
 }
 
 /** Cuadros ASCII de un agente: los de base siempre y, si los tiene, `pose:<id>` y `clip:<clip>:<n>`. */
-export type Atlas = Record<BaseFrameId, AsciiFrame> & Partial<Record<PoseFrameId | ClipFrameId, AsciiFrame>>;
+export type Atlas = Record<BaseFrameId, AsciiFrame> &
+  Partial<Record<PoseFrameId | ClipFrameId | EaseFrameId, AsciiFrame>>;
 
 /** Qué poses y clips (con cuántos cuadros) trae un atlas: lo que el animador puede usar. */
 export function atlasMotion(atlas: Atlas): Motion {
@@ -332,7 +335,8 @@ interface Job {
  * Lee las 8 caras y las convierte a cuadros ASCII. Falla si falta alguna. Además sintetiza los
  * cuadros intermedios de boca (`MOUTH_BLENDS`) mezclando píxel a píxel sus dos caras vecinas, y
  * convierte las poses y los cuadros de clips que el agente tenga (los que no se pueden leer o no
- * miden lo mismo que las caras se descartan; un clip con un cuadro malo se descarta entero). En
+ * miden lo mismo que las caras se descartan; un clip con un cuadro malo se descarta entero). De
+ * cada pose sintetiza además su cuadro de regreso `ease:<pose>` (mezcla a medias con neutral). En
  * modo `grabado` el estiramiento de contraste usa un solo rango calculado sobre las 8 caras, y ese
  * mismo rango vale para poses y clips, para que al alternar entre cuadros el tono no parpadee.
  *
@@ -394,6 +398,15 @@ export async function loadAtlas(
   for (const pose of posesIn(dir)) {
     const path = join(dir, POSES_DIR, `${pose}.png`);
     jobs.push({ id: poseFrameId(pose), files: [path], image: () => optional(path) });
+    // Cuadro de regreso: la pose mezclada a medias con neutral, para soltarla sin saltar.
+    jobs.push({
+      id: easeFrameId(pose),
+      files: [path, facePath('neutral')],
+      image: async () => {
+        const img = await optional(path);
+        return img === undefined ? undefined : blendImages(img, await face('neutral'), 0.5);
+      },
+    });
   }
   const clips = clipsIn(dir);
   for (const clip of CLIP_IDS) {
