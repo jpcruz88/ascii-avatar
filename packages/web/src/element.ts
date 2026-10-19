@@ -204,6 +204,7 @@ export class AsciiAvatarElement extends Base {
         motion: motionOf(manifest),
         now: () => performance.now() - t0,
         voice: manifest.voice,
+        agent: manifest.agent,
         ...(manifest.voiceStyle === undefined ? {} : { voiceStyle: manifest.voiceStyle }),
         tts: this.tts(),
         audio: this.audio,

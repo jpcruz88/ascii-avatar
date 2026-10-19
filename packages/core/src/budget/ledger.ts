@@ -97,10 +97,13 @@ export class Ledger {
     appendFileSync(this.file, `${prefix}${line}\n`);
   }
 
-  /** USD de voz gastados hoy (fecha local). El gasto de creación no cuenta. */
-  spentToday(): number {
+  /**
+   * USD de voz gastados hoy (fecha local). El gasto de creación no cuenta. Con `agent`, solo los
+   * registros cuyo agente cumple el filtro (p. ej. los de la página web, `<nombre>@web`).
+   */
+  spentToday(agent?: (name: string) => boolean): number {
     const today = this.now();
-    return this.sum((r) => r.kind === 'voice' && sameLocalDay(r.ts, today));
+    return this.sum((r) => r.kind === 'voice' && sameLocalDay(r.ts, today) && (agent === undefined || agent(r.agent)));
   }
 
   /** USD de creación gastados por `agent`, de todas las fechas. */

@@ -33,6 +33,8 @@ export interface TtsRequest {
   text: string;
   voice: string;
   style?: string;
+  /** Nombre del agente: el proxy anota el gasto como `<agente>@web`. */
+  agent?: string;
 }
 
 /**
@@ -55,6 +57,8 @@ export interface EngineDeps {
   rng?: () => number;
   voice: string;
   voiceStyle?: string;
+  /** Nombre del agente (se envía al proxy de voz). */
+  agent?: string;
   /** Sin `tts` o sin `audio`, el avatar solo gesticula (boca sintética). */
   tts?: TtsFetch | null;
   audio?: AudioOut | null;
@@ -168,7 +172,12 @@ export class AvatarEngine {
     this.animator.thinking(this.d.now());
     let data: ArrayBuffer;
     try {
-      const req = { text: summary, voice: this.d.voice, ...(this.d.voiceStyle ? { style: this.d.voiceStyle } : {}) };
+      const req: TtsRequest = {
+        text: summary,
+        voice: this.d.voice,
+        ...(this.d.voiceStyle ? { style: this.d.voiceStyle } : {}),
+        ...(this.d.agent ? { agent: this.d.agent } : {}),
+      };
       data = await tts(req, speech.abort.signal);
     } catch (error) {
       if (!this.live(speech)) return;

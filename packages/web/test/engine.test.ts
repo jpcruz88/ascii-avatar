@@ -112,6 +112,7 @@ function setup(opts: { motion?: Motion; tts?: AvatarEngineTts; audio?: AudioOut 
     rng: seeded(),
     voice: 'Kore',
     voiceStyle: 'tranquilo',
+    agent: 'muestra',
     tts: opts.tts ?? null,
     audio: opts.audio ?? null,
     onEvent: (type, detail) => void events.push({ type, detail }),
@@ -247,7 +248,7 @@ describe('AvatarEngine con voz (proxy)', () => {
     const text = 'Hecho. Todo funciona bien.';
     const p = engine.say(text);
     await flush();
-    expect(asked).toEqual([{ text: spokenSummary(text), voice: 'Kore', style: 'tranquilo' }]);
+    expect(asked).toEqual([{ text: spokenSummary(text), voice: 'Kore', style: 'tranquilo', agent: 'muestra' }]);
     expect(events[0]).toMatchObject({ type: 'hablando', detail: { voz: true } });
     // El audio se agenda para que suene al terminar el avance, descontando la latencia de salida.
     expect(audio.started).toEqual([{ delayMs: SPEECH_LEAD_IN_MS - audio.latency, bytes: data.byteLength }]);

@@ -42,6 +42,16 @@ describe('Ledger', () => {
     expect(b.spentCreation('luna')).toBeCloseTo(0.4, 9);
   });
 
+  it('spentToday acepta un filtro por agente (p. ej. solo lo gastado desde la web)', () => {
+    const ledger = new Ledger(file);
+    ledger.record('voice', 'luna', 0.05);
+    ledger.record('voice', 'luna@web', 0.02);
+    ledger.record('voice', 'web@web', 0.03);
+    ledger.record('create', 'x@web', 0.4);
+    expect(ledger.spentToday((agent) => agent.endsWith('@web'))).toBeCloseTo(0.05, 9);
+    expect(ledger.spentToday()).toBeCloseTo(0.1, 9);
+  });
+
   it('un archivo inexistente suma cero', () => {
     const ledger = new Ledger(join(root, 'no-existe.jsonl'));
     expect(ledger.spentToday()).toBe(0);
