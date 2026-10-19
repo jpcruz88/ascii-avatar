@@ -21,16 +21,21 @@ describe('pricing', () => {
     expect(imageCostUsd(0, 0)).toBe(0);
   });
 
-  it('ESTIMATED_FACE_COST_USD ronda 0.055 (calibrado con la corrida en vivo: 8 caras = $0.4203)', () => {
-    expect(ESTIMATED_FACE_COST_USD).toBeCloseTo(0.055, 3);
-    // Nunca por debajo de lo que costó de verdad cada cara en la corrida en vivo.
-    expect(ESTIMATED_FACE_COST_USD).toBeGreaterThanOrEqual(0.4203 / 8);
+  it('ESTIMATED_FACE_COST_USD es 0.065: por encima del promedio real del flujo grabado (16 imágenes)', () => {
+    // Costos reales por imagen del 2026-10-18: grabado base, 7 caras y 8 poses.
+    const real = [
+      0.0679, 0.0607, 0.0542, 0.0555, 0.063, 0.0529, 0.0634, 0.0525, 0.0653, 0.0542, 0.0585, 0.0577, 0.0662, 0.0512,
+      0.0786, 0.0624,
+    ];
+    const avg = real.reduce((a, b) => a + b, 0) / real.length;
+    expect(ESTIMATED_FACE_COST_USD).toBe(0.065);
+    expect(ESTIMATED_FACE_COST_USD).toBeGreaterThan(avg);
+    expect(estimateCreationCostUsd(16)).toBeGreaterThanOrEqual(real.reduce((a, b) => a + b, 0));
   });
 
-  it('estimateCreationCostUsd(8) está entre 0.42 y 0.46', () => {
-    const cost = estimateCreationCostUsd(8);
-    expect(cost).toBeGreaterThanOrEqual(0.42);
-    expect(cost).toBeLessThanOrEqual(0.46);
+  it('estimateCreationCostUsd(16) ronda 1.04 USD, dentro del tope de creación de 1.60', () => {
+    expect(estimateCreationCostUsd(16)).toBeCloseTo(1.04, 10);
+    expect(estimateCreationCostUsd(16)).toBeLessThan(1.6);
   });
 });
 

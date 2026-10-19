@@ -8,7 +8,7 @@ import {
   synthesizeSpeech,
 } from '../src/index.js';
 
-// Pruebas en vivo: llaman a la API real (la cara cuesta ~$0.055, la voz menos de $0.01). Solo corren a propósito.
+// Pruebas en vivo: llaman a la API real (la cara cuesta ~$0.06, la voz menos de $0.01). Solo corren a propósito.
 const live = process.env['RUN_LIVE'] === '1' && Boolean(process.env['GEMINI_API_KEY']);
 
 // Un PNG 1x1 no sirve de retrato; la prueba usa la foto indicada en LIVE_PHOTO.

@@ -143,7 +143,7 @@ describe('runCreate: camino feliz', () => {
     const firstCallAt = events.indexOf('call');
     expect(estimateAt).toBeGreaterThanOrEqual(0);
     expect(estimateAt).toBeLessThan(firstCallAt);
-    expect(output()).toContain('Estimado: $8.10 MXN (tope $29.44 MXN)');
+    expect(output()).toContain('Estimado: $9.57 MXN (tope $29.44 MXN)');
     expect(output()).toContain('Ya gastado en este agente: $0.00 MXN');
     // La confirmación también llega antes de gastar.
     const askAt = events.findIndex((e) => e.startsWith('ask:'));
@@ -182,8 +182,8 @@ describe('runCreate: camino feliz', () => {
     const result = await runCreate(makeDeps({ imageClient: client }));
     expect(result.status).toBe('done');
     expect(output()).toContain('(estimado)');
-    // 0.055 USD por cara estimada, en pesos
-    expect(output()).toContain('($1.01 MXN (estimado))');
+    // 0.065 USD por cara estimada, en pesos
+    expect(output()).toContain('($1.20 MXN (estimado))');
   });
 
   it('todo monto va en pesos: nada de USD ni de montos en dólares', async () => {
@@ -200,7 +200,7 @@ describe('runCreate: camino feliz', () => {
   it('usa el tipo de cambio recibido', async () => {
     const result = await runCreate(makeDeps({ mxnPorUsd: 20 }));
     expect(result.status).toBe('done');
-    expect(output()).toContain('Estimado: $8.80 MXN (tope $32.00 MXN)');
+    expect(output()).toContain('Estimado: $10.40 MXN (tope $32.00 MXN)');
   });
 
   it('con la configuración vacía deja el agente como activo; si ya había uno, no lo toca', async () => {

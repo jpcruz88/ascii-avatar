@@ -1,7 +1,7 @@
 // `avatar create` con el estilo `grabado` (el de por defecto): grabado base desde la foto, y las
 // otras 7 caras y las 8 poses editando ese grabado. Todo con un cliente falso: nunca la API real.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -172,7 +172,7 @@ describe('runCreate grabado: camino feliz', () => {
     expect(estimateAt).toBeGreaterThanOrEqual(0);
     expect(estimateAt).toBeLessThan(firstCall);
     expect(output()).toContain('1 grabado base + 7 caras + 8 poses (16 imágenes)');
-    expect(output()).toContain('Estimado: $16.19 MXN (tope $29.44 MXN)');
+    expect(output()).toContain('Estimado: $19.14 MXN (tope $29.44 MXN)');
     expect(output()).toContain('Ya gastado en este agente: $0.00 MXN');
     expect(events.findIndex((e) => e.startsWith('ask:'))).toBeLessThan(firstCall);
   });
@@ -209,6 +209,18 @@ describe('runCreate grabado: camino feliz', () => {
     expect(result.status).toBe('done');
     const meta = await sharp(readFileSync(join(posesDir(), 'turn_left.png'))).metadata();
     expect([meta.format, meta.width, meta.height]).toEqual(['png', 300, 400]);
+    // Avisa del ajuste, nombrando la pose, su tamaño original y cómo regenerarla.
+    expect(output()).toContain(
+      'Aviso: la pose turn_left llegó de 320×400 px y se ajustó al lienzo del grabado base (300×400 px).',
+    );
+    expect(output()).toContain(`borra ${join(posesDir(), 'turn_left.png')}`);
+    expect(output()).toContain('avatar create luna');
+    expect(output()).not.toContain('Aviso: la cara');
+  });
+
+  it('si todo llega del tamaño del grabado base, no hay avisos de ajuste', async () => {
+    expect((await runCreate(makeDeps())).status).toBe('done');
+    expect(output()).not.toContain('Aviso');
   });
 });
 
@@ -229,6 +241,10 @@ describe('runCreate grabado: confirmaciones y opciones', () => {
     expect(spent()).toBeCloseTo(FACE_COST, 10);
     expect(result.message).toContain('Faltan 15 imágenes');
     expect(result.message).not.toMatch(/USD/);
+    // Cómo empezar de cero con otra foto u otro estilo.
+    expect(result.message).toContain('otra foto u otro estilo');
+    expect(result.message).toContain('otro nombre');
+    expect(result.message).toContain(agentDir());
   });
 
   it('sin poses: 8 llamadas, sin carpeta de poses y el estimado de 8 imágenes', async () => {
@@ -237,7 +253,7 @@ describe('runCreate grabado: confirmaciones y opciones', () => {
     expect(inputs).toHaveLength(8);
     expect(existsSync(posesDir())).toBe(false);
     expect(output()).toContain('1 grabado base + 7 caras (8 imágenes)');
-    expect(output()).toContain('Estimado: $8.10 MXN (tope $29.44 MXN)');
+    expect(output()).toContain('Estimado: $9.57 MXN (tope $29.44 MXN)');
     expect(result.message).toContain('8 caras');
     expect(result.message).toContain('avatar movimientos luna');
   });
@@ -263,7 +279,14 @@ describe('runCreate grabado: confirmaciones y opciones', () => {
     expect(existsSync(posesDir())).toBe(false);
     expect(questions()).toEqual(['¿Generar las caras? (s/N)', '¿Seguimos con las demás caras? (s/N)']);
     expect(loadAgent(root, 'luna').style).toBe('foto');
-    expect(output()).toContain('Estimado: $8.10 MXN (tope $29.44 MXN)');
+    expect(output()).toContain('Estimado: $9.57 MXN (tope $29.44 MXN)');
+  });
+
+  it('estilo foto con poses: false avisa que --sin-poses no tiene efecto', async () => {
+    const result = await runCreate(makeDeps({ style: 'foto', poses: false }));
+    expect(result.status).toBe('done');
+    expect(inputs).toHaveLength(8);
+    expect(output()).toContain('Aviso: --sin-poses no tiene efecto con el estilo foto');
   });
 
   it('no deja cambiar el estilo de un agente ya creado: falla sin preguntar ni gastar', async () => {
@@ -317,7 +340,7 @@ describe('runCreate grabado: errores, reanudación y tope', () => {
     for (const input of inputs.slice(10)) expect(input.image.equals(base)).toBe(true);
     expect(questions()).toEqual(['¿Generar las imágenes? (s/N)']);
     expect(output()).toContain('7 poses (7 imágenes)');
-    expect(output()).toContain('Estimado: $7.08 MXN');
+    expect(output()).toContain('Estimado: $8.37 MXN');
     expect(listPoses(root, 'luna')).toEqual([...POSE_IDS]);
     expect(spent()).toBeCloseTo(16 * FACE_COST, 10);
   });
@@ -338,6 +361,18 @@ describe('runCreate grabado: errores, reanudación y tope', () => {
     expect(resumed.status).toBe('done');
     expect(inputs).toHaveLength(16);
     expect(listPoses(root, 'luna')).toEqual([...POSE_IDS]);
+  });
+
+  it('si un reemplazo de poses quedó a medias (poses.<tag>.old sin poses/), reanudar no vuelve a cobrarlas', async () => {
+    expect((await runCreate(makeDeps())).status).toBe('done');
+    renameSync(posesDir(), join(agentDir(), 'poses.0a1b2c3d4e5f.old'));
+    events.length = 0;
+    const result = await runCreate(makeDeps({ photoPath: undefined }));
+    expect(result.status).toBe('done');
+    expect(inputs).toHaveLength(16);
+    expect(questions()).toEqual([]);
+    expect(listPoses(root, 'luna')).toEqual([...POSE_IDS]);
+    expect(spent()).toBeCloseTo(16 * FACE_COST, 10);
   });
 
   it('un rechazo de Gemini explica cómo aportar las caras a mano', async () => {
@@ -375,6 +410,10 @@ describe('avatar create: banderas (proceso real)', () => {
     const conValor = bin('create', 'luna', '--foto', photoPath, '--sin-poses=si');
     expect(conValor.status).toBe(1);
     expect(conValor.stderr).toContain('--sin-poses no lleva valor');
+
+    const fotoSinPoses = bin('create', 'luna', '--foto', photoPath, '--estilo', 'foto', '--sin-poses');
+    expect(fotoSinPoses.status).toBe(1);
+    expect(fotoSinPoses.stderr).toContain('--sin-poses no tiene efecto con --estilo foto');
 
     const mezcla = bin('create', 'luna', '--caras', root, '--estilo', 'foto');
     expect(mezcla.status).toBe(1);

@@ -31,12 +31,15 @@ export function imageCostUsd(inputTokens: number, outputTokens: number): number 
 }
 
 /**
- * Costo estimado de una cara, calibrado con la corrida en vivo del 2026-10-18: 8 caras costaron
- * $0.4203 (~$0.0525 por cara, 47% más que los $0.0356 que daban 1300 tokens de entrada y 1120 de
- * salida: la API cobra más tokens de salida de los documentados). Se redondea hacia arriba a
- * $0.055 para que el estimado previo nunca quede por debajo de lo que se cobra de verdad.
+ * Costo estimado de una imagen (cara, grabado base o pose), calibrado con el flujo grabado completo
+ * corrido en vivo el 2026-10-18. Costos reales por imagen, en USD: grabado base 0.0679; caras
+ * 0.0607, 0.0542, 0.0555, 0.0630, 0.0529, 0.0634, 0.0525; poses 0.0653, 0.0542, 0.0585, 0.0577,
+ * 0.0662, 0.0512, 0.0786, 0.0624 (promedio ~0.060, máximo 0.079; total de las 16: 0.9642). La API
+ * cobra más tokens de salida de los documentados (1300 de entrada y 1120 de salida darían 0.0356).
+ * Se fija en 0.065 para que el estimado previo sea honesto: 16 imágenes = 1.04 USD, por encima de lo
+ * cobrado de verdad y dentro del tope de creación.
  */
-export const ESTIMATED_FACE_COST_USD = 0.055;
+export const ESTIMATED_FACE_COST_USD = 0.065;
 
 /** Estimación previa (antes de llamar a la API) de lo que cuesta crear `faceCount` caras. */
 export function estimateCreationCostUsd(faceCount: number): number {

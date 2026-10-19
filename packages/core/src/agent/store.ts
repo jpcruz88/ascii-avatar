@@ -25,7 +25,7 @@ import {
 } from '../faces.js';
 import { internColors, readAtlasCache, writeAtlasCache, type AtlasCache } from './atlas-cache.js';
 import { writeFileAtomic } from './atomic.js';
-import { CLIPS_DIR, POSES_DIR, clipFrameFile, clipsIn, posesIn, replaceDir } from './motion.js';
+import { CLIPS_DIR, POSES_DIR, clipFrameFile, clipsIn, posesIn, recoverDir, replaceDir } from './motion.js';
 
 /** Datos del agente que se guardan en `agent.json`. */
 export interface AgentConfig {
@@ -280,6 +280,16 @@ export function savePoses(root: string, name: string, poses: Partial<Record<Pose
     files.set(`${id}.png`, png);
   }
   replaceDir(dir, POSES_DIR, files);
+}
+
+/**
+ * Arregla un reemplazo de poses interrumpido: si quedó `poses.<tag>.old` sin `poses/`, lo restaura,
+ * y borra los temporales. Hay que llamarlo antes de ver qué poses faltan, para no volver a pagar por
+ * poses que en realidad están guardadas. Si el agente no tiene carpeta, no hace nada.
+ */
+export function recoverPoses(root: string, name: string): void {
+  const dir = agentDir(root, name);
+  if (existsSync(dir)) recoverDir(dir, POSES_DIR);
 }
 
 /**

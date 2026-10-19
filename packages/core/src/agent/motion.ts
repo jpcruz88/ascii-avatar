@@ -40,7 +40,7 @@ export function clipsIn(dir: string): Partial<Record<ClipId, number>> {
  * Arregla lo que dejó una importación interrumpida: si falta `<sub>/` pero quedó un
  * `<sub>.<tag>.old`, lo restaura (era el juego vigente); luego borra los `.tmp` y `.old` sobrantes.
  */
-function recoverDir(dir: string, sub: string): void {
+export function recoverDir(dir: string, sub: string): void {
   const leftover = new RegExp(`^${sub}\\.[0-9a-f]+\\.(tmp|old)$`);
   const entries = readdirSync(dir).filter((e) => leftover.test(e));
   const target = join(dir, sub);

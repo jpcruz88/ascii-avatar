@@ -126,6 +126,9 @@ async function create(args: ParsedArgs, root: string): Promise<number> {
   }
   if (estilo !== undefined && !isEstilo(estilo)) return fail('--estilo debe ser grabado o foto.');
   if (sinPoses !== undefined && sinPoses !== true) return fail('--sin-poses no lleva valor.');
+  if (estilo === 'foto' && sinPoses === true) {
+    return fail('--sin-poses no tiene efecto con --estilo foto: ese estilo no genera poses. Quita una de las dos.');
+  }
   if (caras !== undefined || poses !== undefined || clips !== undefined) {
     if (estilo !== undefined || sinPoses !== undefined) {
       return fail('--estilo y --sin-poses son para generar con Gemini: no se combinan con --caras, --poses ni --clips.');

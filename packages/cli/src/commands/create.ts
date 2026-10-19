@@ -15,6 +15,7 @@ import {
   listPoses,
   loadAgent,
   missingFaces,
+  recoverPoses,
   saveFace,
   savePose,
   validateAgentName,
@@ -146,8 +147,13 @@ export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
       style = stored;
     }
     withPoses = style === 'grabado' && deps.poses !== false;
+    if (style === 'foto' && deps.poses === false) {
+      out('Aviso: --sin-poses no tiene efecto con el estilo foto (ese estilo no genera poses).');
+    }
 
     if (exists) {
+      // Un reemplazo de poses interrumpido se arregla antes de contar: si no, se volverían a cobrar.
+      recoverPoses(root, name);
       missing = missingFaces(root, name);
       if (missing.length === 0 && missingPoses().length === 0) {
         const what = withPoses ? `sus ${FACE_IDS.length} caras y ${POSE_IDS.length} poses` : `las ${FACE_IDS.length} caras`;
@@ -172,23 +178,37 @@ export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
       photo = await readPhoto(deps.photoPath);
     }
 
-    /** Una llamada de pago: tope antes, y guardar y registrar el costo justo después. */
+    /**
+     * Una llamada de pago: tope antes, y guardar y registrar el costo justo después. Con `fit`, la
+     * imagen se lleva al lienzo del grabado base y, si llegó de otro tamaño, se avisa.
+     */
     const pay = async (
       done: string,
       input: ImageEditInput,
       save: (png: Buffer) => void,
-      size?: { width: number; height: number },
+      fit?: { size: { width: number; height: number }; what: string; file: string },
     ): Promise<Buffer> => {
       assertWithinCap(ledger.spentCreation(name), ESTIMATED_FACE_COST_USD, cap, rate);
       const { image, costUsd, costEstimated } = await generateImage(imageClient, input);
       let png: Buffer;
+      let warning: string | undefined;
       try {
-        png = await toPng(image, size); // Gemini devuelve JPEG; todo se guarda siempre como PNG real
+        if (fit !== undefined) {
+          const got = await readSize(image, fit.what);
+          if (got.width !== fit.size.width || got.height !== fit.size.height) {
+            warning =
+              `Aviso: ${fit.what} llegó de ${got.width}×${got.height} px y se ajustó al lienzo del grabado base ` +
+              `(${fit.size.width}×${fit.size.height} px). Si se ve desalineada, borra ${fit.file} y vuelve a correr ` +
+              `avatar create ${name} para regenerarla.`;
+          }
+        }
+        png = await toPng(image, fit?.size); // Gemini devuelve JPEG; todo se guarda siempre como PNG real
         save(png);
       } finally {
         ledger.record('create', name, costUsd); // lo cobrado se registra aunque falle la conversión o el guardado
       }
       out(`${done} (${mxn(costUsd)}${costEstimated ? ' (estimado)' : ''})`);
+      if (warning !== undefined) out(warning);
       return png;
     };
     const preview = async (png: Buffer, mode: AsciiMode): Promise<void> => {
@@ -223,7 +243,9 @@ export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
         if (left > 0 && !(await ask('¿Se parece? ¿Seguimos? (s/N)'))) {
           return {
             status: 'declined',
-            message: `Te quedaste con el grabado base (ya cobrado). Faltan ${left} imágenes; vuelve a correr el comando para continuar.`,
+            message:
+              `Te quedaste con el grabado base (ya cobrado). Faltan ${left} imágenes; vuelve a correr el comando para continuar. ` +
+              `Para empezar de cero con otra foto u otro estilo, usa otro nombre de agente o borra la carpeta ${agentDir}.`,
           };
         }
       }
@@ -233,10 +255,18 @@ export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
       const size = await readSize(base, 'el grabado base');
       const fromBase = (prompt: string): ImageEditInput => ({ prompt, image: base, mimeType: 'image/png' });
       for (const id of faces) {
-        await pay(`Cara ${id} lista`, fromBase(ENGRAVING_FACE_PROMPTS[id]), (p) => saveFace(root, name, id, p), size);
+        await pay(`Cara ${id} lista`, fromBase(ENGRAVING_FACE_PROMPTS[id]), (p) => saveFace(root, name, id, p), {
+          size,
+          what: `la cara ${id}`,
+          file: join(agentDir, 'faces', `${id}.png`),
+        });
       }
       for (const id of poses) {
-        await pay(`Pose ${id} lista`, fromBase(POSE_PROMPTS[id]), (p) => savePose(root, name, id, p), size);
+        await pay(`Pose ${id} lista`, fromBase(POSE_PROMPTS[id]), (p) => savePose(root, name, id, p), {
+          size,
+          what: `la pose ${id}`,
+          file: join(agentDir, 'poses', `${id}.png`),
+        });
       }
 
       const left = [...missingFaces(root, name), ...missingPoses()];

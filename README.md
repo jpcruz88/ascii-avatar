@@ -100,24 +100,24 @@ avatar create ana --foto ~/Fotos/ana.jpg
 
 El nombre del agente va de 1 a 32 caracteres entre `a-z`, `0-9` y guion. Si omites `--foto`, el comando te la pide (acepta PNG, JPG o WebP de hasta 10 MB, con cada lado entre 256 y 8000 px; sirve arrastrar el archivo a la terminal).
 
-Por defecto el agente sale en **estilo grabado**: un retrato en blanco y negro, de líneas finas de tinta y trama sobre papel blanco, como una lámina del siglo XVIII, que es justo lo que mejor se ve en el modo `grabado` del panel. Se generan 16 imágenes: el grabado base (la cara `neutral`), las otras siete caras y las ocho poses (ver [Poses y clips de movimiento](#poses-y-clips-de-movimiento)). Las caras y las poses no salen de la foto sino de editar el grabado base, así que todas conservan el mismo trazo, encuadre y tamaño. Cuesta alrededor de $16 a $23 MXN en total (cada imagen ronda entre $1.01 y $1.45 MXN). El flujo es:
+Por defecto el agente sale en **estilo grabado**: un retrato en blanco y negro, de líneas finas de tinta y trama sobre papel blanco, como una lámina del siglo XVIII, que es justo lo que mejor se ve en el modo `grabado` del panel. Se generan 16 imágenes: el grabado base (la cara `neutral`), las otras siete caras y las ocho poses (ver [Poses y clips de movimiento](#poses-y-clips-de-movimiento)). Las caras y las poses no salen de la foto sino de editar el grabado base, así que todas conservan el mismo trazo, encuadre y tamaño. Cuesta alrededor de $17 a $23 MXN en total (cada imagen ronda entre $1.00 y $1.45 MXN); el estimado que se muestra antes de gastar es de unos $19 MXN, un poco por encima de lo que se cobró en la corrida real. El flujo es:
 
 1. **Llave de Gemini.** Si no hay una guardada ni definida en `GEMINI_API_KEY`, te la pide sin mostrarla al escribir y la guarda en `~/.ascii-avatar/secrets.json` con permisos 0600 (la carpeta queda en 0700). La llave nunca se guarda dentro de la carpeta del agente ni en el repositorio.
-2. **Estimado y confirmación.** Antes de gastar nada muestra qué falta generar, el costo estimado, el tope y lo que ya se gastó en ese agente, todo en pesos mexicanos (por ejemplo, `Estilo grabado: 1 grabado base + 7 caras + 8 poses (16 imágenes).` y `Estimado: $16.19 MXN (tope $29.44 MXN)`). Solo continúa si respondes `s`, `si` o `sí`.
-3. **Vista previa barata.** Genera primero el grabado base, lo guarda como `faces/neutral.png` y lo dibuja en la terminal en modo grabado. Te pregunta «¿Se parece? ¿Seguimos? (s/N)». Si no se parece a ti, responde que no: solo gastaste una imagen (alrededor de $1 MXN). El agente ya quedó creado con esa foto y no se puede cambiar: para reintentar con otra foto, usa un nombre nuevo (`avatar create ana2 --foto otra.jpg`) o borra la carpeta `~/.ascii-avatar/agents/<nombre>` y empieza de cero. Si corres `avatar create` con el mismo nombre y una foto distinta, el comando se detiene sin preguntar ni gastar y te indica la carpeta.
-4. **El resto.** Si apruebas, genera las otras siete caras y luego las ocho poses. Cada imagen se guarda en disco como PNG y se registra su costo apenas termina.
+2. **Estimado y confirmación.** Antes de gastar nada muestra qué falta generar, el costo estimado, el tope y lo que ya se gastó en ese agente, todo en pesos mexicanos (por ejemplo, `Estilo grabado: 1 grabado base + 7 caras + 8 poses (16 imágenes).` y `Estimado: $19.14 MXN (tope $29.44 MXN)`). Solo continúa si respondes `s`, `si` o `sí`.
+3. **Vista previa barata.** Genera primero el grabado base, lo guarda como `faces/neutral.png` y lo dibuja en la terminal en modo grabado. Te pregunta «¿Se parece? ¿Seguimos? (s/N)». Si no se parece a ti, responde que no: solo gastaste una imagen (alrededor de $1.25 MXN). El agente ya quedó creado con esa foto y ese estilo, y no se pueden cambiar: para reintentar con otra foto u otro estilo, usa un nombre nuevo (`avatar create ana2 --foto otra.jpg`) o borra la carpeta `~/.ascii-avatar/agents/<nombre>` y empieza de cero. Si corres `avatar create` con el mismo nombre y una foto distinta, el comando se detiene sin preguntar ni gastar y te indica la carpeta.
+4. **El resto.** Si apruebas, genera las otras siete caras y luego las ocho poses. Cada imagen se guarda en disco como PNG y se registra su costo apenas termina. Si Gemini entrega una cara o pose de otro tamaño que el grabado base, se ajusta a ese lienzo (centrada, con relleno blanco) y te avisa con su tamaño original; si se ve desalineada, borra ese archivo y vuelve a correr el comando para regenerarla.
 5. **Tope.** Antes de cada imagen comprueba el tope de creación del agente ($29.44 MXN, de sobra para las 16). Si se fuera a pasar, se detiene, avisa qué falta y deja guardado lo ya generado.
 
 Al terminar te muestra un resumen y te sugiere `avatar movimientos <nombre>` para sumar clips de movimiento suaves.
 
 Opciones:
 
-- `--sin-poses`: genera solo las ocho caras (8 imágenes, unos $8 MXN). Si después corres `avatar create <nombre>` sin esa opción, genera solo las poses que faltan.
-- `--estilo foto`: el flujo realista de antes. Las ocho caras se editan directamente sobre tu foto, con su color y su fondo, y no se generan poses (unos $8 MXN). Aquí la vista previa es la cara `mouth_open` y la pregunta es «¿Seguimos con las demás caras? (s/N)».
+- `--sin-poses`: genera solo las ocho caras (8 imágenes, entre $8.50 y $11.50 MXN; estimado de unos $9.57 MXN). Si después corres `avatar create <nombre>` sin esa opción, genera solo las poses que faltan.
+- `--estilo foto`: el flujo realista de antes. Las ocho caras se editan directamente sobre tu foto, con su color y su fondo, y no se generan poses (8 imágenes, entre $8 y $11.50 MXN). Aquí la vista previa es la cara `mouth_open` y la pregunta es «¿Seguimos con las demás caras? (s/N)». Con este estilo `--sin-poses` no tiene sentido: el comando lo rechaza si lo combinas con `--estilo foto`.
 
 El estilo queda anotado en `agent.json` y no se puede cambiar al reanudar: si pides otro estilo para un agente que ya existe, el comando se detiene sin gastar. Los agentes creados antes de que existiera el estilo grabado (o importados con `--caras`) cuentan como `foto`.
 
-Si algo se interrumpe (falla la red, cerraste la terminal), basta con volver a correr el mismo comando (con la misma foto o sin `--foto`): reutiliza la foto guardada y el grabado base, y solo genera las caras y poses que faltan. Nunca se vuelve a pagar por una imagen ya hecha.
+Si algo se interrumpe (falla la red, cerraste la terminal), basta con volver a correr el mismo comando (con la misma foto o sin `--foto`): reutiliza la foto guardada y el grabado base, y solo genera las caras y poses que faltan. Nunca se vuelve a pagar por una imagen ya hecha: si el corte dejó a medias el guardado de las poses, primero se restaura la carpeta `poses/` y después se cuenta lo que falta.
 
 El tope sí es definitivo: el gasto de creación se acumula por agente, así que si ya llegaste a $29.44 MXN, volver a correr `avatar create` te pide confirmar y se detiene en la primera imagen por el mismo tope. Las caras que falten las aportas tú con `avatar create <nombre> --caras <carpeta>` (ver [paquete de caras manual](#aportar-un-paquete-de-caras-manual)); ese comando no usa Gemini, así que el tope no le afecta.
 
@@ -251,9 +251,9 @@ Las tarifas son las de la documentación oficial de Gemini verificadas el 18 de 
 
 | Concepto | Cifra |
 | --- | --- |
-| Modelo de imágenes | `gemini-nano-banana-2.1`, unos $1.01 MXN por cara, incluida la foto de entrada (estimado, calibrado con una corrida real: 8 caras costaron unos $7.73 MXN) |
-| Un agente completo (8 imágenes) | alrededor de $8 MXN (entre $7.73 y $8.28 MXN) |
-| Meta normal de creación | menos de $11 MXN por agente |
+| Modelo de imágenes | `gemini-nano-banana-2.1`, entre $1.00 y $1.45 MXN por imagen, incluida la imagen de entrada (corrida real del flujo grabado: 16 imágenes costaron unos $17.74 MXN); el estimado previo usa $1.20 MXN por imagen |
+| Un agente completo en estilo grabado (16 imágenes) | entre $17 y $23 MXN (estimado previo: unos $19 MXN) |
+| Solo las caras (`--sin-poses` o `--estilo foto`, 8 imágenes) | entre $8 y $11.50 MXN (estimado previo: unos $9.57 MXN) |
 | Tope duro de creación | unos $29 MXN por agente |
 | Voz | unos $0.55 MXN por minuto (tarifa conservadora: el registro sobrestima un poco) |
 | Límite diario de voz | unos $5.50 MXN (unos 10 minutos de voz), configurable |

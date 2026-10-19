@@ -33,6 +33,7 @@ export {
   loadAgent,
   loadAtlas,
   missingFaces,
+  recoverPoses,
   saveClips,
   saveFace,
   savePose,

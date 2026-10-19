@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
@@ -16,6 +16,7 @@ import {
   listPoses,
   loadAtlas,
   poseFrameId,
+  recoverPoses,
   saveClips,
   saveFace,
   savePose,
@@ -118,6 +119,24 @@ describe('savePoses y listPoses', () => {
     const ok = await solid(1);
     expect(() => savePose(root, 'luna', 'saludo' as never, ok)).toThrow(/desconocida/i);
     expect(listPoses(root, 'luna')).toEqual(['nod_up']);
+  });
+
+  it('recoverPoses restaura un reemplazo interrumpido (poses.<tag>.old sin poses/) y borra temporales', async () => {
+    await agentWithFaces();
+    savePoses(root, 'luna', { nod_up: await solid(3), look_left: await solid(4) });
+    renameSync(join(dir(), 'poses'), join(dir(), 'poses.0a1b2c3d4e5f.old'));
+    mkdirSync(join(dir(), 'poses.ffeeddccbbaa.tmp'));
+    expect(listPoses(root, 'luna')).toEqual([]);
+    recoverPoses(root, 'luna');
+    expect(listPoses(root, 'luna')).toEqual(['nod_up', 'look_left']);
+    expect(readdirSync(dir()).filter((f) => f.includes('.tmp') || f.includes('.old'))).toEqual([]);
+  });
+
+  it('recoverPoses no hace nada si no hay restos, ni si el agente no tiene carpeta', async () => {
+    await agentWithFaces();
+    recoverPoses(root, 'luna');
+    expect(listPoses(root, 'luna')).toEqual([]);
+    expect(() => recoverPoses(root, 'nadie')).not.toThrow();
   });
 
   it('sin carpeta de poses, no hay poses', async () => {
