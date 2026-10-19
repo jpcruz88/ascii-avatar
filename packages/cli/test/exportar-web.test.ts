@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { FACE_IDS, createAgent, parseWebExport, saveClips, saveFace, savePoses, type FaceId } from '@ascii-avatar/core';
+import { FACE_IDS, createAgent, parseWebExport, saveClips, saveFace, savePose, savePoses, type FaceId } from '@ascii-avatar/core';
 import { parseArgs, unknownFlags } from '../src/args.js';
 import { runExportWeb } from '../src/commands/exportar-web.js';
 
@@ -170,6 +170,25 @@ describe('runExportWeb', () => {
     expect(r2.status).toBe('failed');
     expect(r2.message).toMatch(/faltan caras/i);
     expect(existsSync(join(cwd, 'incompleto-web'))).toBe(false);
+  });
+
+  it('un agente del flujo grabado (style en agent.json, poses de a una) exporta poses y clips', async () => {
+    createAgent(root, 'grabado', await png(FACE_SVG.neutral), { style: 'grabado', promptsVersion: 2 });
+    for (const id of FACE_IDS) saveFace(root, 'grabado', id, await png(FACE_SVG[id]));
+    savePose(root, 'grabado', 'tilt_left', await png(svgFace({ dx: -6, dy: 3 })));
+    savePose(root, 'grabado', 'look_right', await png(svgFace({ dx: 8 })));
+    saveClips(root, 'grabado', { think: [await png(svgFace()), await png(svgFace({ dx: 4 })), await png(svgFace())] });
+    const r = await runExportWeb({ root, name: 'grabado', cols: 40, cwd });
+    expect(r.status).toBe('ok');
+    const manifest = JSON.parse(readFileSync(join(cwd, 'grabado-web', 'manifest.json'), 'utf8'));
+    expect(manifest.poses).toEqual(['tilt_left', 'look_right']);
+    expect(manifest.clips).toEqual({ think: 3 });
+    expect(manifest.frames).toEqual(
+      expect.arrayContaining(['pose:tilt_left', 'ease:tilt_left', 'pose:look_right', 'ease:look_right', 'clip:think:2']),
+    );
+    expect(manifest).not.toHaveProperty('style');
+    const { frames } = parseWebExport(manifest, readFileSync(join(cwd, 'grabado-web', 'frames.txt'), 'utf8'));
+    expect(frames.get('pose:tilt_left')).not.toBe(frames.get('neutral'));
   });
 
   it('rechaza un nombre inválido o cols fuera de rango', async () => {
