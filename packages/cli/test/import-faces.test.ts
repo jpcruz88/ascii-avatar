@@ -425,6 +425,33 @@ describe('runImportFaces con --poses y --clips', () => {
     expect(warning).toMatch(/ignorar/i);
   });
 
+  it('reimportar caras a un agente sin neutral.png (creación interrumpida) funciona', async () => {
+    await writeFaces();
+    await run();
+    rmSync(join(agentDir(), 'faces', 'neutral.png'));
+    const result = await runWith();
+    expect(result.status).toBe('done');
+    expect(missingFaces(root, 'ana')).toEqual([]);
+  });
+
+  it('reimportar caras a un agente con neutral.png dañada también funciona', async () => {
+    await writeFaces();
+    await run();
+    writeFileSync(join(agentDir(), 'faces', 'neutral.png'), 'basura');
+    const result = await runWith();
+    expect(result.status).toBe('done');
+  });
+
+  it('poses solas a un agente sin neutral.png: failed con un mensaje claro', async () => {
+    await writeFaces();
+    await run();
+    rmSync(join(agentDir(), 'faces', 'neutral.png'));
+    await writePoses(['look_left']);
+    const result = await runWith({ faces: false, poses: true });
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('--caras');
+  });
+
   it('con caras válidas pero clips inválidos no escribe nada, ni siquiera las caras', async () => {
     await writeFaces();
     await run();

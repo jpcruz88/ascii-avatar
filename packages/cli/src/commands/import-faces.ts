@@ -201,8 +201,16 @@ export async function runImportFaces(deps: ImportFacesDeps): Promise<ImportFaces
       loadAgent(root, name);
       if (deps.photoPath !== undefined) out(`El agente "${name}" ya existe: se conserva su foto y se ignora --foto.`);
     }
+    // Tamaño de las caras actuales; si no se puede leer (p. ej. una creación interrumpida dejó el
+    // agente sin neutral.png), las caras nuevas de --caras mandan y no se bloquea nada.
     const current = exists ? await agentCanvas(dir) : undefined;
-    const canvas = imported?.size ?? current!;
+    const canvas = imported?.size ?? current;
+    if (canvas === undefined) {
+      throw new ImageInputError(
+        `No se pudo leer la cara neutral del agente "${name}" para comprobar el tamaño. ` +
+          'Vuelve a importar sus 8 caras con --caras (puedes sumar --poses y --clips en el mismo comando).',
+      );
+    }
     stage = 'las poses';
     const poses = posesDir === undefined ? undefined : await readPoses(posesDir, canvas);
     stage = 'los clips';
@@ -244,10 +252,14 @@ export async function runImportFaces(deps: ImportFacesDeps): Promise<ImportFaces
   }
 }
 
-/** Tamaño de las caras que ya tiene el agente (su `neutral.png`). */
-async function agentCanvas(dir: string): Promise<Size> {
+/** Tamaño de las caras que ya tiene el agente (su `neutral.png`), o `undefined` si falta o está dañada. */
+async function agentCanvas(dir: string): Promise<Size | undefined> {
   const label = 'la cara neutral del agente';
-  return readSize(readImageFile(join(dir, 'faces', 'neutral.png'), label), label);
+  try {
+    return await readSize(readImageFile(join(dir, 'faces', 'neutral.png'), label), label);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
