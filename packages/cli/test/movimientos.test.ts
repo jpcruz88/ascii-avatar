@@ -69,7 +69,7 @@ const argValue = (args: readonly string[], flag: string): string => {
  */
 function fakeSpawner(
   calls: FakeCall[],
-  opts: { frames?: number; fail?: boolean; hang?: boolean; noise?: boolean } = {},
+  opts: { frames?: number; fail?: boolean; hang?: boolean; noise?: boolean; beforeClose?: () => void } = {},
 ): Spawner {
   return (command, args, options) => {
     const call: FakeCall = { command, args, options, killed: [] };
@@ -96,10 +96,16 @@ function fakeSpawner(
       if (opts.noise) stdout.write('Load cropper model...\n');
       for (const clip of clips) {
         mkdirSync(join(out, clip), { recursive: true });
+        // Fase 1: LivePortrait calcula cada cuadro; fase 2: se escribe cada PNG.
         for (let i = 0; i < n; i++) {
-          writeFileSync(join(out, clip, `${String(i).padStart(3, '0')}.png`), await solid(10 + i));
-          stdout.write(`${JSON.stringify({ clip, frame: i + 1, total: n })}\n`);
+          stdout.write(`${JSON.stringify({ clip, frame: i + 1, total: n, phase: 'calc' })}\n`);
           if (opts.hang) return; // se queda colgado hasta que lo maten
+        }
+        for (let i = 0; i < n; i++) {
+          const png = await solid(10 + i);
+          if (call.killed.length > 0) return;
+          writeFileSync(join(out, clip, `${String(i).padStart(3, '0')}.png`), png);
+          stdout.write(`${JSON.stringify({ clip, frame: i + 1, total: n, phase: 'write' })}\n`);
           if (opts.fail && i === 2) {
             stderr.write('Traceback...\nRuntimeError: MPS se quedó sin memoria\n');
             stdout.end();
@@ -112,7 +118,10 @@ function fakeSpawner(
       stdout.write(`${JSON.stringify({ done: true, clips: Object.fromEntries(clips.map((c) => [c, { frames: n }])) })}\n`);
       stdout.end();
       stderr.end();
-      setImmediate(() => child.emit('close', 0, null));
+      setImmediate(() => {
+        opts.beforeClose?.();
+        child.emit('close', 0, null);
+      });
     })();
     return child as unknown as ChildHandle;
   };
@@ -197,6 +206,13 @@ describe('checkPrerequisites', () => {
     expect(r).toMatchObject({ ok: false, message: expect.stringMatching(/pretrained_weights[\s\S]*huggingface-cli download/) });
   });
 
+  it('avisa si falta el script (instalación empaquetada sin tools/)', async () => {
+    await makeAgent();
+    makeLivePortrait(lpDir);
+    const r = checkPrerequisites(root, 'ana', lpDir, join(root, 'no-hay', 'generate_clips.py'));
+    expect(r).toMatchObject({ ok: false, message: expect.stringMatching(/repositorio clonado de ascii-avatar/) });
+  });
+
   it('avisa si el agente no existe o no tiene faces/neutral.png', async () => {
     makeLivePortrait(lpDir);
     expect(checkPrerequisites(root, 'ana', lpDir)).toMatchObject({
@@ -219,6 +235,7 @@ describe('checkPrerequisites', () => {
       python: join(lpDir, 'venv', 'bin', 'python'),
       repo: lpDir,
       source: join(root, 'agents', 'ana', 'faces', 'neutral.png'),
+      script: DEFAULT_SCRIPT,
     });
     const nested = join(root, 'spike');
     makeLivePortrait(nested, 'nested');
@@ -248,6 +265,69 @@ describe('runMovimientos', () => {
     expect(options.shell).toBeUndefined();
   });
 
+  it('no pasa al proceso de Python llaves ni tokens del entorno', async () => {
+    await makeAgent();
+    makeLivePortrait(lpDir);
+    const calls: FakeCall[] = [];
+    const env = {
+      PATH: '/usr/bin',
+      HF_HOME: '/hf',
+      GEMINI_API_KEY: 'g',
+      GOOGLE_API_KEY: 'go',
+      ANTHROPIC_API_KEY: 'a',
+      OPENAI_API_KEY: 'o',
+      HF_TOKEN: 'h',
+      HUGGING_FACE_HUB_TOKEN: 'hh',
+      GITHUB_TOKEN: 'gh',
+      AWS_SECRET_ACCESS_KEY: 's',
+    };
+    await run({ clips: ['nod'], spawn: fakeSpawner(calls, { frames: 2 }), env });
+    const passed = calls[0]!.options.env;
+    expect(passed).toMatchObject({ PATH: '/usr/bin', HF_HOME: '/hf', PYTORCH_ENABLE_MPS_FALLBACK: '1' });
+    for (const k of ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'HF_TOKEN', 'HUGGING_FACE_HUB_TOKEN', 'GITHUB_TOKEN', 'AWS_SECRET_ACCESS_KEY']) {
+      expect(passed, k).not.toHaveProperty(k);
+    }
+  });
+
+  it('si guardar la configuración falla tras importar, avisa pero termina bien', async () => {
+    await makeAgent();
+    makeLivePortrait(lpDir);
+    const r = await run({
+      clips: ['nod'],
+      spawn: fakeSpawner([], { frames: 2 }),
+      rememberDir: () => {
+        throw new Error('EACCES: permiso denegado');
+      },
+    });
+    expect(r.status).toBe('done');
+    expect(listClips(root, 'ana')).toEqual({ nod: 2 });
+    expect(lines.some((l) => /Aviso: no se pudo guardar la carpeta de LivePortrait.*EACCES/.test(l))).toBe(true);
+  });
+
+  it('descarta con un aviso un clip guardado con algún cuadro dañado, sin perder la generación', async () => {
+    await makeAgent();
+    makeLivePortrait(lpDir);
+    saveClips(root, 'ana', {
+      think: [await solid(1), await solid(2), await solid(3)],
+      turn_left: [await solid(1), await solid(2)],
+    });
+    writeFileSync(join(root, 'agents', 'ana', 'clips', 'think', '001.png'), 'no es un png');
+    const r = await run({ clips: ['nod'], spawn: fakeSpawner([], { frames: 3 }) });
+    expect(r.status).toBe('done');
+    expect(listClips(root, 'ana')).toEqual({ nod: 3, turn_left: 2 });
+    expect(lines.some((l) => /Aviso: se descarta el clip think/.test(l))).toBe(true);
+  });
+
+  it('descarta un clip guardado de otro tamaño', async () => {
+    await makeAgent();
+    makeLivePortrait(lpDir);
+    saveClips(root, 'ana', { think: [await solid(1), await solid(2)] });
+    writeFileSync(join(root, 'agents', 'ana', 'clips', 'think', '001.png'), await solid(2, W + 1, H));
+    const r = await run({ clips: ['nod'], spawn: fakeSpawner([], { frames: 2 }) });
+    expect(r.status).toBe('done');
+    expect(listClips(root, 'ana')).toEqual({ nod: 2 });
+  });
+
   it('sin --clips genera los seis', async () => {
     await makeAgent();
     makeLivePortrait(lpDir);
@@ -268,9 +348,10 @@ describe('runMovimientos', () => {
     expect(r.message).toMatch(/nod/);
     expect(lines[0]).toMatch(/^Generando nod con LivePortrait/);
     expect(listClips(root, 'ana')).toEqual({ nod: 17 });
-    expect(progress).toHaveLength(17);
-    expect(progress[0]).toEqual({ clip: 'nod', frame: 1, total: 17 });
-    expect(progress[16]).toEqual({ clip: 'nod', frame: 17, total: 17 });
+    expect(progress).toHaveLength(34);
+    expect(progress[0]).toEqual({ clip: 'nod', frame: 1, total: 17, phase: 'calc' });
+    expect(progress[17]).toEqual({ clip: 'nod', frame: 1, total: 17, phase: 'write' });
+    expect(progress[33]).toEqual({ clip: 'nod', frame: 17, total: 17, phase: 'write' });
     expect(existsSync(argValue(calls[0]!.args, '--out'))).toBe(false);
     const frame5 = readFileSync(join(root, 'agents', 'ana', 'clips', 'nod', '005.png'));
     expect(frame5.equals(await solid(15))).toBe(true);
@@ -355,6 +436,39 @@ describe('runMovimientos', () => {
     expect(listClips(root, 'ana')).toEqual({});
     expect(existsSync(argValue(calls[0]!.args, '--out'))).toBe(false);
   });
+
+  it('un Ctrl-C que llega cuando Python ya terminó cancela antes de importar', async () => {
+    await makeAgent();
+    makeLivePortrait(lpDir);
+    saveClips(root, 'ana', { think: [await solid(1), await solid(2)] });
+    const calls: FakeCall[] = [];
+    const ac = new AbortController();
+    const r = await run({ clips: ['nod'], spawn: fakeSpawner(calls, { frames: 2, beforeClose: () => ac.abort() }), signal: ac.signal });
+    expect(r.status).toBe('cancelled');
+    expect(listClips(root, 'ana')).toEqual({ think: 2 });
+    expect(existsSync(argValue(calls[0]!.args, '--out'))).toBe(false);
+  });
+
+  it('si Node sale mientras corre Python, lo mata por su handle (y luego quita el aviso de salida)', async () => {
+    await makeAgent();
+    makeLivePortrait(lpDir);
+    const before = process.listeners('exit');
+    const calls: FakeCall[] = [];
+    let added: ((...a: unknown[]) => void)[] = [];
+    const r = await run({
+      clips: ['nod'],
+      spawn: fakeSpawner(calls, { hang: true }),
+      progress: () => {
+        if (added.length > 0) return;
+        added = process.listeners('exit').filter((l) => !before.includes(l)) as typeof added;
+        for (const l of added) l(0);
+      },
+    });
+    expect(added).toHaveLength(1);
+    expect(calls[0]!.killed).toEqual(['SIGTERM']);
+    expect(r.status).toBe('failed');
+    expect(process.listeners('exit')).toEqual(before);
+  });
 });
 
 describe('progressPrinter', () => {
@@ -363,19 +477,24 @@ describe('progressPrinter', () => {
     return { chunks, stream: { isTTY, write: (s: string) => void chunks.push(s) } };
   };
 
-  it('en una terminal redibuja la misma línea y salta al terminar cada clip', () => {
+  it('en una terminal redibuja la misma línea en dos fases y salta solo al terminar de guardar', () => {
     const { chunks, stream } = collect(true);
     const p = progressPrinter(stream);
-    p({ clip: 'nod', frame: 1, total: 2 });
-    p({ clip: 'nod', frame: 2, total: 2 });
-    expect(chunks[0]).toMatch(/^\r\x1b\[2K {2}nod .* 1\/2$/);
+    p({ clip: 'nod', frame: 1, total: 2, phase: 'calc' });
+    p({ clip: 'nod', frame: 2, total: 2, phase: 'calc' });
+    expect(chunks[0]).toMatch(/^\r\x1b\[2K {2}nod .*calculando 1\/2$/);
+    expect(chunks.join('')).not.toContain('\n');
+    p({ clip: 'nod', frame: 1, total: 2, phase: 'write' });
+    p({ clip: 'nod', frame: 2, total: 2, phase: 'write' });
+    expect(chunks.at(-2)).toMatch(/guardando 2\/2$/);
     expect(chunks.join('')).toMatch(/2\/2\n$/);
   });
 
   it('fuera de una terminal escribe una línea por clip terminado', () => {
     const { chunks, stream } = collect(false);
     const p = progressPrinter(stream);
-    for (let i = 1; i <= 3; i++) p({ clip: 'think', frame: i, total: 3 });
+    for (let i = 1; i <= 3; i++) p({ clip: 'think', frame: i, total: 3, phase: 'calc' });
+    for (let i = 1; i <= 3; i++) p({ clip: 'think', frame: i, total: 3, phase: 'write' });
     expect(chunks).toEqual(['  think: 3 cuadros\n']);
   });
 });

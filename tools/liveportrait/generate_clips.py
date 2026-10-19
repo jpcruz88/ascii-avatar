@@ -14,9 +14,10 @@ Cómo funciona:
      completa. Así las líneas siguen nítidas y el lienzo es exactamente el de la cara neutral.
   3. Los cuadros con ángulo 0 (el primero, el último y las pausas) son el original exacto.
 
-Salida: <out>/<clip>/000.png, 001.png… Por stdout solo salen líneas JSON: una de avance por
-cuadro ({"clip":"nod","frame":3,"total":17}), un resumen final ({"done":true,...}) o un error
-({"error":"..."}). Todo lo demás (los registros de LivePortrait) va a stderr.
+Salida: <out>/<clip>/000.png, 001.png… Por stdout solo salen líneas JSON: avance por cuadro en
+dos fases, al calcularlo ({"clip":"nod","frame":3,"total":17,"phase":"calc"}) y al escribir su PNG
+("phase":"write"), un resumen final ({"done":true,...}) o un error ({"error":"..."}). Todo lo
+demás (los registros de LivePortrait) va a stderr.
 
 Convenciones de ángulos (en grados, verificadas con renders de prueba):
   pitch + = cabeza hacia abajo; yaw + = la cara gira hacia la izquierda de la imagen;
@@ -222,7 +223,11 @@ class Generator:
         return img, float(np.hypot(fx, fy).max())
 
     def clip(self, name, angles, out_dir, on_frame):
-        """Genera un clip completo en out_dir/name/NNN.png. Devuelve un pequeño informe."""
+        """Genera un clip completo en out_dir/name/NNN.png. Devuelve un pequeño informe.
+
+        on_frame(fase, cuadro, total) se llama al calcular cada cuadro con LivePortrait
+        (fase "calc") y al escribir cada PNG final (fase "write").
+        """
         np, cv2 = self.np, self.cv2
         n = len(angles)
         zero = [is_zero(a) for a in angles]
@@ -232,7 +237,7 @@ class Generator:
                 flows.append(np.zeros((CROP_SIZE, CROP_SIZE, 2), np.float32))
             else:
                 flows.append(self.crop_flow(self.render(float(p), float(y), float(r))))
-            on_frame(i + 1, n)
+            on_frame("calc", i + 1, n)
         # Suavizado temporal [1 2 1] del flujo; los extremos y los cuadros neutros quedan fijos.
         smooth = [flows[0]]
         for i in range(1, n - 1):
@@ -253,6 +258,7 @@ class Generator:
                 max_disp = max(max_disp, disp)
             if not cv2.imwrite(os.path.join(d, f"{i:03d}.png"), img):
                 raise RuntimeError(f"No se pudo escribir {name}/{i:03d}.png")
+            on_frame("write", i + 1, n)
         return {"frames": n, "max_disp_px": round(max_disp, 1)}
 
 
@@ -303,8 +309,10 @@ def main(argv=None):
         gen = Generator(repo, source)
         report = {}
         for name in clips:
-            report[name] = gen.clip(name, angles[name], out_dir,
-                                    lambda f, n, name=name: out.emit({"clip": name, "frame": f, "total": n}))
+            report[name] = gen.clip(
+                name, angles[name], out_dir,
+                lambda phase, f, n, name=name: out.emit({"clip": name, "frame": f, "total": n, "phase": phase}),
+            )
         out.emit({"done": True, "seconds": round(time.time() - t0, 1), "clips": report})
         return 0
     except KeyboardInterrupt:

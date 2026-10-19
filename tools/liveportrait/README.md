@@ -8,6 +8,13 @@ llama a mano: lo lanza `avatar movimientos <nombre>`.
 Este script es nuestro (licencia MIT, como el resto del repositorio). LivePortrait **no** se copia
 aquí: se clona e instala por separado (ver la sección «Movimientos fluidos» del README principal).
 
+**Licencias de terceros.** LivePortrait, sus pesos y los componentes que descarga tienen sus propias
+licencias, distintas de la de este repositorio. El código de LivePortrait es MIT
+([LICENSE](https://github.com/KlingTeam/LivePortrait/blob/main/LICENSE)), pero algunos componentes,
+como los modelos de detección de caras de [InsightFace](https://github.com/deepinsight/insightface),
+solo permiten uso no comercial o de investigación. Revisa esas licencias antes de usar los clips
+generados con fines comerciales.
+
 ## Uso directo
 
 ```sh
@@ -21,7 +28,9 @@ aquí: se clona e instala por separado (ver la sección «Movimientos fluidos» 
 Escribe `<out>/<clip>/000.png`, `001.png`… con el mismo lienzo que la cara neutral. Por stdout
 solo salen líneas JSON:
 
-- avance, una por cuadro: `{"clip": "nod", "frame": 3, "total": 17}`
+- avance por cuadro, en dos fases: al calcularlo con LivePortrait
+  (`{"clip": "nod", "frame": 3, "total": 17, "phase": "calc"}`) y al escribir su PNG final
+  (`"phase": "write"`)
 - resumen al final: `{"done": true, "seconds": 41.2, "clips": {"nod": {"frames": 17, "max_disp_px": 17.8}}}`
 - o un error: `{"error": "RuntimeError: ..."}` (y código de salida distinto de 0)
 
