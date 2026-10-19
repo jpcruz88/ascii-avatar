@@ -1,6 +1,6 @@
 # ascii-avatar
 
-Una cara hecha de caracteres de terminal para tu agente de IA. Subes una foto una sola vez, el sistema genera un paquete de ocho caras con Gemini y, desde ese momento, un panel lateral de tu terminal muestra a ese agente gesticulando (boca, parpadeo, sonrisa, seriedad, sorpresa, tristeza) cada vez que Claude Code termina de responder. Si activas la voz, además habla un resumen corto de la respuesta con la boca moviéndose.
+Una cara hecha de caracteres de terminal para tu agente de IA. Subes una foto una sola vez, el sistema genera con Gemini un paquete de ocho caras y ocho poses en estilo grabado y, desde ese momento, un panel lateral de tu terminal muestra a ese agente gesticulando (boca, parpadeo, sonrisa, seriedad, sorpresa, tristeza) cada vez que Claude Code termina de responder. Si activas la voz, además habla un resumen corto de la respuesta con la boca moviéndose.
 
 ```
   +-------------------------------------+------------------------+
@@ -70,7 +70,10 @@ Ten presente que el enlace apunta a la carpeta del repositorio: si la mueves o l
 Los comandos disponibles son:
 
 ```
-avatar create <nombre> [--foto <ruta>]   Crea un agente a partir de una foto (usa Gemini)
+avatar create <nombre> [--foto <ruta>] [--estilo grabado|foto] [--sin-poses]
+                                         Crea un agente a partir de una foto (usa Gemini). Por defecto,
+                                         estilo grabado: 8 caras y 8 poses (16 imágenes); --sin-poses
+                                         genera solo las caras; --estilo foto, las 8 caras realistas
 avatar create <nombre> --caras <carpeta> [--foto <ruta>] [--poses <carpeta>] [--clips <carpeta>]
                                          Importa tus propias ocho caras PNG y, si quieres, poses y clips
                                          de movimiento (sin Gemini, sin llave, sin costo)
@@ -95,17 +98,28 @@ avatar help                              Muestra esta ayuda
 avatar create ana --foto ~/Fotos/ana.jpg
 ```
 
-El nombre del agente va de 1 a 32 caracteres entre `a-z`, `0-9` y guion. Si omites `--foto`, el comando te la pide (acepta PNG, JPG o WebP de hasta 10 MB, con cada lado entre 256 y 8000 px; sirve arrastrar el archivo a la terminal). El flujo es:
+El nombre del agente va de 1 a 32 caracteres entre `a-z`, `0-9` y guion. Si omites `--foto`, el comando te la pide (acepta PNG, JPG o WebP de hasta 10 MB, con cada lado entre 256 y 8000 px; sirve arrastrar el archivo a la terminal).
+
+Por defecto el agente sale en **estilo grabado**: un retrato en blanco y negro, de líneas finas de tinta y trama sobre papel blanco, como una lámina del siglo XVIII, que es justo lo que mejor se ve en el modo `grabado` del panel. Se generan 16 imágenes: el grabado base (la cara `neutral`), las otras siete caras y las ocho poses (ver [Poses y clips de movimiento](#poses-y-clips-de-movimiento)). Las caras y las poses no salen de la foto sino de editar el grabado base, así que todas conservan el mismo trazo, encuadre y tamaño. Cuesta alrededor de $16 a $23 MXN en total (cada imagen ronda entre $1.01 y $1.45 MXN). El flujo es:
 
 1. **Llave de Gemini.** Si no hay una guardada ni definida en `GEMINI_API_KEY`, te la pide sin mostrarla al escribir y la guarda en `~/.ascii-avatar/secrets.json` con permisos 0600 (la carpeta queda en 0700). La llave nunca se guarda dentro de la carpeta del agente ni en el repositorio.
-2. **Estimado y confirmación.** Antes de gastar nada muestra el costo estimado de las caras que faltan (unos $1.01 MXN por cara, incluida la foto de entrada, y alrededor de $8 MXN para las ocho), el tope y lo que ya se gastó en ese agente, todo en pesos mexicanos (por ejemplo, `Estimado: $8.10 MXN (tope $29.44 MXN)`). Solo continúa si respondes `s`, `si` o `sí`.
-3. **Vista previa barata.** Genera primero una sola cara, `mouth_open`, y la dibuja en la terminal. Si no se parece a ti o la definición no te convence, responde que no: solo gastaste una imagen (unos $1.01 MXN). El agente ya quedó creado con esa foto y no se puede cambiar: para reintentar con otra foto, usa un nombre nuevo (`avatar create ana2 --foto otra.jpg`) o borra la carpeta `~/.ascii-avatar/agents/<nombre>` y empieza de cero. Si corres `avatar create` con el mismo nombre y una foto distinta, el comando se detiene sin preguntar ni gastar y te indica la carpeta.
-4. **El resto.** Si apruebas, genera las otras siete caras. Cada una se guarda en disco y se registra su costo apenas termina.
-5. **Tope.** Si el gasto de creación de ese agente llegara a $29.44 MXN, se detiene y avisa. Lo ya generado queda guardado.
+2. **Estimado y confirmación.** Antes de gastar nada muestra qué falta generar, el costo estimado, el tope y lo que ya se gastó en ese agente, todo en pesos mexicanos (por ejemplo, `Estilo grabado: 1 grabado base + 7 caras + 8 poses (16 imágenes).` y `Estimado: $16.19 MXN (tope $29.44 MXN)`). Solo continúa si respondes `s`, `si` o `sí`.
+3. **Vista previa barata.** Genera primero el grabado base, lo guarda como `faces/neutral.png` y lo dibuja en la terminal en modo grabado. Te pregunta «¿Se parece? ¿Seguimos? (s/N)». Si no se parece a ti, responde que no: solo gastaste una imagen (alrededor de $1 MXN). El agente ya quedó creado con esa foto y no se puede cambiar: para reintentar con otra foto, usa un nombre nuevo (`avatar create ana2 --foto otra.jpg`) o borra la carpeta `~/.ascii-avatar/agents/<nombre>` y empieza de cero. Si corres `avatar create` con el mismo nombre y una foto distinta, el comando se detiene sin preguntar ni gastar y te indica la carpeta.
+4. **El resto.** Si apruebas, genera las otras siete caras y luego las ocho poses. Cada imagen se guarda en disco como PNG y se registra su costo apenas termina.
+5. **Tope.** Antes de cada imagen comprueba el tope de creación del agente ($29.44 MXN, de sobra para las 16). Si se fuera a pasar, se detiene, avisa qué falta y deja guardado lo ya generado.
 
-Si algo se interrumpe (falla la red, cerraste la terminal), basta con volver a correr el mismo comando (con la misma foto o sin `--foto`): reutiliza la foto guardada y solo genera las caras que faltan. Nunca se vuelve a pagar por una cara ya hecha.
+Al terminar te muestra un resumen y te sugiere `avatar movimientos <nombre>` para sumar clips de movimiento suaves.
 
-El tope sí es definitivo: el gasto de creación se acumula por agente, así que si ya llegaste a $29.44 MXN, volver a correr `avatar create` te pide confirmar y se detiene en la primera cara por el mismo tope. Las caras que falten las aportas tú con `avatar create <nombre> --caras <carpeta>` (ver [paquete de caras manual](#aportar-un-paquete-de-caras-manual)); ese comando no usa Gemini, así que el tope no le afecta.
+Opciones:
+
+- `--sin-poses`: genera solo las ocho caras (8 imágenes, unos $8 MXN). Si después corres `avatar create <nombre>` sin esa opción, genera solo las poses que faltan.
+- `--estilo foto`: el flujo realista de antes. Las ocho caras se editan directamente sobre tu foto, con su color y su fondo, y no se generan poses (unos $8 MXN). Aquí la vista previa es la cara `mouth_open` y la pregunta es «¿Seguimos con las demás caras? (s/N)».
+
+El estilo queda anotado en `agent.json` y no se puede cambiar al reanudar: si pides otro estilo para un agente que ya existe, el comando se detiene sin gastar. Los agentes creados antes de que existiera el estilo grabado (o importados con `--caras`) cuentan como `foto`.
+
+Si algo se interrumpe (falla la red, cerraste la terminal), basta con volver a correr el mismo comando (con la misma foto o sin `--foto`): reutiliza la foto guardada y el grabado base, y solo genera las caras y poses que faltan. Nunca se vuelve a pagar por una imagen ya hecha.
+
+El tope sí es definitivo: el gasto de creación se acumula por agente, así que si ya llegaste a $29.44 MXN, volver a correr `avatar create` te pide confirmar y se detiene en la primera imagen por el mismo tope. Las caras que falten las aportas tú con `avatar create <nombre> --caras <carpeta>` (ver [paquete de caras manual](#aportar-un-paquete-de-caras-manual)); ese comando no usa Gemini, así que el tope no le afecta.
 
 Al terminar, si no tenías ningún agente activo, el nuevo queda como agente activo en `~/.ascii-avatar/config.json`.
 
@@ -118,7 +132,7 @@ Todo lo del agente vive en `~/.ascii-avatar/agents/<nombre>/`:
   ledger.jsonl                registro de gasto
   avatar.sock                 canal local entre el hook y el panel (solo mientras el panel está abierto)
   agents/<nombre>/
-    agent.json                nombre, voz, estilo de voz, personalidad, fecha, versión de los prompts
+    agent.json                nombre, voz, estilo de voz, personalidad, fecha, versión de los prompts, estilo (grabado o foto)
     photo.png | .jpg | .webp  la foto original
     faces/<id>.png            las ocho caras
     poses/<id>.png            poses opcionales (ver «Poses y clips de movimiento»)
@@ -333,7 +347,7 @@ Con solo las ocho caras el avatar parpadea, cambia de expresión y mueve la boca
 
 **Clips** (`clips/<clip>/000.png`, `001.png`, …): secuencias suaves que empiezan y terminan en la cara neutral, con los cuadros numerados desde `000` sin huecos (al menos dos y como mucho 120, es decir 5 s). Se reproducen a 24 cuadros por segundo. Los clips son `nod` (asentir), `tilt_left`, `tilt_right` (ladear), `turn_left`, `turn_right` (girar) y `think` (pensar).
 
-Se importan sin Gemini y sin costo, junto con las caras o después, sobre un agente que ya existe (sin tocar sus caras ni su `agent.json`):
+Si creaste el agente con `avatar create` en estilo grabado (el de por defecto), las ocho poses ya se generaron solas. Si no, o si prefieres las tuyas, se importan sin Gemini y sin costo, junto con las caras o después, sobre un agente que ya existe (sin tocar sus caras ni su `agent.json`):
 
 ```sh
 avatar create ana --caras ~/Imagenes/ana-caras --poses ~/Imagenes/ana-poses --clips ~/Imagenes/ana-clips
