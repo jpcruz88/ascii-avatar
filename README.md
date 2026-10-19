@@ -26,6 +26,7 @@ Lo que hace y lo que no:
 - Todo corre en tu máquina. No hay servidor del autor, ni cuentas extra, ni GPU.
 - El avatar nunca lee la respuesta completa en voz alta: dice un resumen de pocas frases (hasta unos 220 caracteres) sin código, rutas ni tablas.
 - Con la voz apagada solo gesticula; la respuesta sigue apareciendo como texto en la terminal.
+- Si le das poses y clips de movimiento (opcionales), además mira a los lados, ladea la cabeza, asiente entre frases y se queda pensativo mientras esperas (ver [Poses y clips de movimiento](#poses-y-clips-de-movimiento)).
 
 ## Requisitos
 
@@ -70,8 +71,12 @@ Los comandos disponibles son:
 
 ```
 avatar create <nombre> [--foto <ruta>]   Crea un agente a partir de una foto (usa Gemini)
-avatar create <nombre> --caras <carpeta> [--foto <ruta>]
-                                         Importa tus propias ocho caras PNG (sin Gemini, sin llave, sin costo)
+avatar create <nombre> --caras <carpeta> [--foto <ruta>] [--poses <carpeta>] [--clips <carpeta>]
+                                         Importa tus propias ocho caras PNG y, si quieres, poses y clips
+                                         de movimiento (sin Gemini, sin llave, sin costo)
+avatar create <nombre> --poses <carpeta> | --clips <carpeta>
+                                         Agrega o reemplaza las poses o los clips de un agente que ya
+                                         existe, sin tocar sus caras
 avatar panel [--agente <nombre>] [--cols <n>] [--modo grabado|glyphs|halfblock]
                                          Abre el panel (tecla v: voz, q: salir)
 avatar voice on|off                      Activa o desactiva la voz
@@ -116,6 +121,9 @@ Todo lo del agente vive en `~/.ascii-avatar/agents/<nombre>/`:
     agent.json                nombre, voz, estilo de voz, personalidad, fecha, versión de los prompts
     photo.png | .jpg | .webp  la foto original
     faces/<id>.png            las ocho caras
+    poses/<id>.png            poses opcionales (ver «Poses y clips de movimiento»)
+    clips/<clip>/000.png …    clips de movimiento opcionales
+    .cache/                   cuadros ya convertidos a ASCII, para que el panel abra rápido (se puede borrar)
 ```
 
 Para compartir un agente basta con copiar la carpeta `agents/<nombre>` (no contiene tu llave). Sí contiene la foto original de la persona, así que compártela solo con permiso.
@@ -192,9 +200,9 @@ El comando recuerda la última opción en `~/.ascii-avatar/config.json` y, si ha
 
 - Con la voz encendida, cada respuesta se convierte en un resumen corto (se quitan código, rutas y tablas), se sintetiza con Gemini, se reproduce con `afplay` y la boca se mueve según el volumen del audio.
 - Con la voz apagada, la boca se mueve igual con el texto del resumen, pero no suena nada. La respuesta sigue en texto en tu terminal.
-- Al hablar, el avatar muestra primero la expresión medio segundo y luego mueve la boca; el audio arranca justo en ese momento, así boca y voz van juntas.
+- Al hablar, el avatar muestra primero la expresión medio segundo y luego mueve la boca. Como `afplay` tarda unas decenas de milisegundos en sonar desde que se lanza, el audio se lanza 80 ms antes (`AUDIO_START_LATENCY_MS`), así el sonido empieza justo cuando la boca se mueve y boca y voz van juntas.
 
-**Cómo se mueve la boca.** La boca tiene cinco aperturas, de 0 (cerrada) a 4 (abierta). Tres son caras del paquete (`neutral`, `mouth_mid`, `mouth_open`) y las otras dos (`mouth_q1` y `mouth_q3`) se sintetizan al abrir el panel mezclando a partes iguales las dos caras vecinas, sin imágenes nuevas ni gasto. Con voz, el volumen se mide cada 20 ms, se compara con el percentil 95 del propio audio (lo muy bajo cuenta como silencio), se suaviza para que la boca abra rápido (unos 25 ms) y cierre algo más despacio (unos 90 ms), y se pasa a las cinco aperturas con histéresis: la boca recorre los niveles intermedios de uno en uno, no tiembla con cambios mínimos de volumen, un clic suelto apenas la entreabre y, antes de cambiar de dirección, mantiene cada nivel al menos 60 ms. La boca se adelanta unos 60 ms al audio, como cuando alguien habla de verdad. Sin voz, cada sílaba aproximada del texto dibuja un arco que abre y cierra pasando por las aperturas intermedias: la vocal decide cuánto abre (la *a* más que la *e* o la *o*, y estas más que la *i* o la *u*), la sílaba tónica abre más, la boca cierra un momento entre palabras y la puntuación la deja cerrada más tiempo. Mientras habla, el panel dibuja a unos 24 cuadros por segundo; en reposo baja a unos 12 y solo redibuja cuando cambia la cara o el pie.
+**Cómo se mueve la boca.** La boca tiene cinco aperturas, de 0 (cerrada) a 4 (abierta). Tres son caras del paquete (`neutral`, `mouth_mid`, `mouth_open`) y las otras dos (`mouth_q1` y `mouth_q3`) se sintetizan al abrir el panel mezclando a partes iguales las dos caras vecinas, sin imágenes nuevas ni gasto. Con voz, el volumen se mide cada 20 ms, se compara con el percentil 85 del propio audio (lo muy bajo cuenta como silencio, y una muestra dañada, NaN o infinita, también: no congela la boca); con el 85 las sílabas acentuadas llegan a las aperturas 3 y 4 en vez de quedarse en la 2, se suaviza para que la boca abra rápido (unos 25 ms) y cierre algo más despacio (unos 90 ms), y se pasa a las cinco aperturas con histéresis: la boca recorre los niveles intermedios de uno en uno, no tiembla con cambios mínimos de volumen, un clic suelto apenas la entreabre y, antes de cambiar de dirección, mantiene cada nivel al menos 60 ms. La boca se adelanta unos 60 ms al audio, como cuando alguien habla de verdad. Sin voz, cada sílaba aproximada del texto dibuja un arco que abre y cierra pasando por las aperturas intermedias: la vocal decide cuánto abre (la *a* más que la *e* o la *o*, y estas más que la *i* o la *u*), la sílaba tónica abre más, la boca cierra un momento entre palabras y la puntuación la deja cerrada más tiempo. Mientras habla (o reproduce un clip de movimiento), el panel dibuja a 24 cuadros por segundo, con la deriva corregida (cada cuadro se agenda a su hora, así el tiempo de dibujar no se acumula); en reposo baja a unos 12 y solo redibuja cuando cambia la cara o el pie.
 - La voz necesita la llave de Gemini y macOS. Sin ellas el avatar sigue funcionando solo con gestos y lo avisa en el pie.
 
 ### Voz y estilo de cada agente
@@ -298,6 +306,45 @@ Si el agente no existe, lo crea; si ya existe, solo reemplaza sus ocho caras y d
 Las imágenes quedan en `~/.ascii-avatar/agents/<nombre>/faces/<id>.png`. El campo `promptsVersion` de su `agent.json` vale `0`, que marca un paquete que no vino de los prompts de Gemini.
 
 Para comprobar que tus imágenes no tiemblan antes de usarlas, corre el experimento de abajo con `--faces-dir`.
+
+Si además tienes poses o clips de movimiento, impórtalos en el mismo comando con `--poses` y `--clips`, o después (ver [Poses y clips de movimiento](#poses-y-clips-de-movimiento)).
+
+## Poses y clips de movimiento
+
+Con solo las ocho caras el avatar parpadea, cambia de expresión y mueve la boca, siempre de frente. Si además le das poses sueltas y clips de movimiento, cobra vida: mira a los lados, ladea la cabeza, asiente entre frases y se queda pensativo mientras esperas. Son opcionales: el paquete de ocho caras sigue siendo obligatorio y no cambia, y si no hay poses ni clips el avatar se comporta exactamente como antes.
+
+**Poses** (`poses/<id>.png`): una imagen suelta por pose, en el mismo lienzo que las caras (mismo tamaño en píxeles, por ejemplo 896 × 1193, misma cámara, luz y fondo). Puedes dar todas o solo algunas:
+
+| Archivo | Qué muestra |
+| --- | --- |
+| `tilt_left.png`, `tilt_right.png` | cabeza ladeada a la izquierda o a la derecha |
+| `nod_up.png`, `nod_down.png` | cabeza un poco arriba o abajo (asintiendo) |
+| `turn_left.png`, `turn_right.png` | cabeza girada a un lado |
+| `look_left.png`, `look_right.png` | solo la mirada hacia un lado |
+
+**Clips** (`clips/<clip>/000.png`, `001.png`, …): secuencias suaves que empiezan y terminan en la cara neutral, con los cuadros numerados desde `000` sin huecos (al menos dos). Se reproducen a 24 cuadros por segundo. Los clips son `nod` (asentir), `tilt_left`, `tilt_right` (ladear), `turn_left`, `turn_right` (girar) y `think` (pensar).
+
+Se importan sin Gemini y sin costo, junto con las caras o después, sobre un agente que ya existe (sin tocar sus caras ni su `agent.json`):
+
+```sh
+avatar create ana --caras ~/Imagenes/ana-caras --poses ~/Imagenes/ana-poses --clips ~/Imagenes/ana-clips
+avatar create ana --poses ~/Imagenes/ana-poses     # solo las poses, a un agente existente
+avatar create ana --clips ~/Imagenes/ana-clips     # solo los clips
+```
+
+La carpeta de `--poses` lleva los `<id>.png`; la de `--clips`, una subcarpeta por clip (`nod/000.png`, `nod/001.png`, `think/000.png`…). Antes de escribir nada se comprueba que cada archivo sea un PNG real (por la cabecera), pese 10 MB o menos y mida exactamente lo mismo que las caras (las que importas en ese momento o las que ya tiene el agente), que los nombres sean conocidos y que la numeración de cada clip vaya de `000.png` en adelante sin huecos. Si algo falla, el mensaje dice qué archivo y por qué, y no se cambia nada. Los archivos ocultos (como `.DS_Store`) y los que no son `.png` se ignoran. Cada importación reemplaza el juego entero de ese tipo: si importas poses, el agente queda exactamente con las poses de la carpeta (lo mismo con los clips).
+
+**Cómo se mueve.**
+
+- **En reposo**, cada 4 a 9 segundos hace un gesto elegido al azar con pesos: mirar a un lado (la pose `look_*` sostenida de 0,8 a 1,5 s, o un clip `turn_*`), ladear la cabeza (clip `tilt_*`; si no hay clip pero sí la pose `tilt_*`, la sostiene) o, rara vez, asentir (clip `nod`). Nunca repite el mismo gesto dos veces seguidas.
+- **Pensando** (cuando envías un mensaje), reproduce el clip `think`, sostiene una pose suave (`look_*` o `turn_*`) y descansa de 2 a 4 s antes de repetir.
+- **Hablando**, la boca sigue de frente con sus cinco aperturas. En las pausas de la boca de 350 ms o más entre frases asiente con el clip `nod` (o ladea con `tilt_*`), como mucho una vez cada 3 s. Si el clip no cabe en la pausa, hace un tramo corto de ida y vuelta de sus primeros cuadros, que termina en neutral. Al terminar de hablar, tras los 3 s con la expresión, vuelve al reposo.
+- **Parpadeo**: sigue igual, pero nunca durante un gesto (los cuadros de un clip ya traen sus propios ojos): un parpadeo que caería dentro se hace al terminar el gesto.
+- Mientras se ve un clip (y un instante antes de que empiece), el panel dibuja a 24 cuadros por segundo; durante una pose sostenida basta el ritmo de reposo.
+
+Todo esto lo decide el animador de forma determinista (con la fuente de azar inyectada en las pruebas), así que se puede probar sin terminal.
+
+**Arranque y caché.** Convertir 8 caras, 8 poses y 6 clips de 16 cuadros a 150 columnas en modo `grabado` tarda unos 3 s. Por eso el panel guarda los cuadros ya convertidos en `agents/<nombre>/.cache/` (un archivo por modo y ancho, escrito de forma atómica). Cada cuadro se reutiliza mientras no cambien la fecha y el tamaño de sus archivos, el ancho, el modo ni el tono de las caras; con la caché, el mismo agente abre en unos 50 ms. Si cambias un archivo, solo se vuelve a convertir ese cuadro. Una pose o un cuadro de clip dañado o de otro tamaño se descarta (y de un clip con un cuadro malo se descarta el clip entero) sin impedir que el panel abra. Borrar `.cache/` es seguro: se rehace al abrir el panel.
 
 ## Experimento opcional: ver la definición y la estabilidad
 
