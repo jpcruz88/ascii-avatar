@@ -18,7 +18,7 @@ Una cara hecha de caracteres de terminal para tu agente de IA. Subes una foto un
   pie del panel:  ana · voz: on · gasto hoy: $0.012
 ```
 
-(Es solo una ilustración. La cara real sale de tu foto y se dibuja con color de 24 bits.)
+(Es solo una ilustración. La cara real sale de tu foto y se dibuja en blanco y negro, como un grabado: tinta oscura sobre papel claro.)
 
 Lo que hace y lo que no:
 
@@ -72,7 +72,7 @@ Los comandos disponibles son:
 avatar create <nombre> [--foto <ruta>]   Crea un agente a partir de una foto (usa Gemini)
 avatar create <nombre> --caras <carpeta> [--foto <ruta>]
                                          Importa tus propias ocho caras PNG (sin Gemini, sin llave, sin costo)
-avatar panel [--agente <nombre>] [--cols <n>] [--modo glyphs|halfblock]
+avatar panel [--agente <nombre>] [--cols <n>] [--modo grabado|glyphs|halfblock]
                                          Abre el panel (tecla v: voz, q: salir)
 avatar voice on|off                      Activa o desactiva la voz
 avatar install-hook [--uninstall] [--settings <ruta>]
@@ -164,7 +164,10 @@ Opciones:
 
 - `--agente <nombre>`: usa ese agente en lugar del activo.
 - `--cols <n>`: ancho de la cara en columnas, entre 20 y 500 (por defecto 70; nunca pasa del ancho real de la terminal).
-- `--modo glyphs|halfblock`: `glyphs` dibuja un carácter de una rampa de densidad por celda; `halfblock` usa medios bloques `▀` con color de frente y de fondo, que da más definición. Por defecto es `halfblock`.
+- `--modo grabado|glyphs|halfblock`: el aspecto de la cara. Por defecto es `grabado`.
+  - `grabado` (por defecto): blanco y negro, como los grabados en ASCII. Tinta oscura (`#141414`) sobre papel claro (`#FAFAF7`) con una rampa de 70 caracteres donde lo oscuro es lo más denso. Antes de convertir, la imagen se pasa a grises, se estira el contraste (con un solo rango para las ocho caras, para que no parpadeen al alternarlas), se afina el contraste (x1,25, -20) y un viñeteado radial difumina el fondo hacia el blanco. El panel pinta su propio papel, así que se ve igual en una terminal oscura o clara.
+  - `glyphs`: un carácter de una rampa de densidad por celda, con el color de la foto en el frente.
+  - `halfblock`: medios bloques `▀` con color de 24 bits de frente y de fondo; a color, con más definición.
 
 Una sola sesión del panel recibe los mensajes de todas tus sesiones de Claude Code (comparten un canal local en `~/.ascii-avatar/avatar.sock`). Si ya hay un panel abierto, el segundo avisa y no arranca.
 
@@ -214,7 +217,7 @@ Cómo se aplican:
   "activeAgent": "ana",
   "voice": false,
   "dailyLimitUsd": 0.5,
-  "mode": "halfblock",
+  "mode": "grabado",
   "cols": 70
 }
 ```
@@ -267,7 +270,7 @@ Para comprobar que tus imágenes no tiemblan antes de usarlas, corre el experime
 
 ## Experimento opcional: ver la definición y la estabilidad
 
-El repositorio incluye un experimento desechable que convierte las ocho caras a ASCII en los dos modos y las alterna como lo haría el avatar. Sirve para juzgar a simple vista si la definición y el parecido te convencen, y para medir si las imágenes están alineadas. Se corre desde la raíz del repositorio:
+El repositorio incluye un experimento desechable que convierte las ocho caras a ASCII en los modos `glyphs` y `halfblock` y las alterna como lo haría el avatar. Sirve para juzgar a simple vista si la definición y el parecido te convencen, y para medir si las imágenes están alineadas. Se corre desde la raíz del repositorio:
 
 ```sh
 # Sin costo: con caras que ya tienes (<id>.png en una carpeta)
@@ -288,7 +291,7 @@ Qué mirar:
 - **La reproducción.** Alterna `neutral`, `mouth_mid`, `mouth_open`, parpadeo y sonrisa a 6 cuadros por segundo, en modo `glyphs` y luego en `halfblock`. Ctrl-C para salir. Fíjate en el parecido con la persona, en la definición y en si algo salta de un cuadro a otro.
 - Al generar, muestra `mouth_open` y pregunta si se parece a la persona antes de gastar en el resto.
 
-Con esto puedes decidir entre `--modo glyphs` y `--modo halfblock`.
+Con esto puedes comparar `--modo glyphs` y `--modo halfblock`; el modo `grabado` (el de por defecto) se ve con `avatar panel`.
 
 Si las caras generadas te convencen, no pagues dos veces: `avatar create <nombre> --caras ~/ascii-avatar-spike --foto <foto>` las reutiliza como paquete manual (sin Gemini y sin costo). Ojo: el gasto del experimento no se anota en `ledger.jsonl`; el tope `--cap` es lo único que lo limita.
 
@@ -307,7 +310,7 @@ Los ids de modelo se pueden cambiar sin tocar el código por si Google retira o 
 
 **El panel dice "Terminal muy pequeña".** La ventana mide menos de 20 columnas o 10 filas. Agranda el split o baja el ancho con `--cols`. Si la cara es más ancha o alta que la ventana, se recorta al centro; agranda el split o usa `--cols` más chico.
 
-**La cara se ve como bloques de color raros o sin color.** Tu terminal no soporta color de 24 bits. Usa una terminal que sí lo soporte (iTerm2, Ghostty, kitty, WezTerm) o prueba `--modo glyphs`.
+**La cara se ve con manchas o con tonos grises raros.** Tu terminal no soporta color de 24 bits (el modo `grabado` también pinta tinta y papel con color de 24 bits). Usa una terminal que sí lo soporte (iTerm2, Ghostty, kitty, WezTerm) o prueba `--modo glyphs`.
 
 **"No hay un agente activo".** Crea uno con `avatar create <nombre>` o pasa `--agente <nombre>`. Si dice que faltan caras, vuelve a correr `avatar create <nombre>`.
 
