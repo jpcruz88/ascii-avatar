@@ -66,6 +66,7 @@ function setup(
     activeAgent: 'luna',
     voice: over.voice ?? true,
     dailyLimitUsd: DEFAULT_DAILY_LIMIT_USD,
+    mxnPorUsd: 18.4,
     mode: 'halfblock',
     cols: 70,
   };
@@ -190,7 +191,34 @@ describe('PanelController', () => {
     expect(s.tts.speak).not.toHaveBeenCalled();
     expect(s.play).not.toHaveBeenCalled();
     expect(s.say).toHaveBeenCalledTimes(1);
-    expect(s.controller.notice()).toBe('Límite diario de voz alcanzado');
+    expect(s.controller.notice()).toBe('Límite diario de voz alcanzado ($5.52 MXN)');
+  });
+
+  it('limiteDiarioMxn manda sobre dailyLimitUsd y se convierte con mxnPorUsd', async () => {
+    const s = setup();
+    s.config.limiteDiarioMxn = 1.84; // 0.10 USD a 18.4
+    s.ledger.record('voice', 'luna', 0.1);
+    await s.controller.handle({ type: 'say', text: PROSE });
+    expect(s.tts.speak).not.toHaveBeenCalled();
+    expect(s.controller.notice()).toBe('Límite diario de voz alcanzado ($1.84 MXN)');
+  });
+
+  it('con limiteDiarioMxn por encima del gasto sí habla, aunque dailyLimitUsd ya estaría superado', async () => {
+    const s = setup();
+    s.config.limiteDiarioMxn = 18.4; // 1 USD
+    s.ledger.record('voice', 'luna', 0.5); // pasa de dailyLimitUsd (0.3) pero no de 1 USD
+    await s.controller.handle({ type: 'say', text: PROSE });
+    expect(s.tts.speak).toHaveBeenCalledTimes(1);
+    expect(s.controller.notice()).toBeNull();
+  });
+
+  it('el aviso de límite usa el tipo de cambio de la configuración', async () => {
+    const s = setup();
+    s.config.mxnPorUsd = 20;
+    s.config.limiteDiarioMxn = 2; // 0.1 USD
+    s.ledger.record('voice', 'luna', 0.1);
+    await s.controller.handle({ type: 'say', text: PROSE });
+    expect(s.controller.notice()).toBe('Límite diario de voz alcanzado ($2.00 MXN)');
   });
 
   it('con la voz encendida pero sin cliente TTS, anima y avisa que falta la llave', async () => {

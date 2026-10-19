@@ -1,4 +1,4 @@
-import { INK, PAPER, frameToAnsi, type AsciiFrame } from '@ascii-avatar/core';
+import { INK, PAPER, formatMxn, frameToAnsi, type AsciiFrame } from '@ascii-avatar/core';
 
 const MIN_COLS = 20;
 const MIN_ROWS = 10;
@@ -47,10 +47,12 @@ export function fitFrame(
 export function footerText(s: {
   agent: string;
   voice: boolean;
+  /** Gasto de hoy en USD (como lo registra el ledger); en el pie se muestra en pesos. */
   spent: number | null;
+  mxnPorUsd: number;
   notice: string | null;
 }): string {
-  const base = `${s.agent} · voz: ${s.voice ? 'on' : 'off'} · gasto hoy: ${s.spent === null ? '?' : `$${s.spent.toFixed(3)}`}`;
+  const base = `${s.agent} · voz: ${s.voice ? 'on' : 'off'} · gasto hoy: ${s.spent === null ? '?' : formatMxn(s.spent, s.mxnPorUsd)}`;
   return s.notice === null ? base : `${base} · ${s.notice}`;
 }
 
@@ -107,6 +109,8 @@ export interface TtyOptions {
   fast?(): boolean;
   voiceOn(): boolean;
   spentToday(): number;
+  /** Tipo de cambio con el que el pie muestra el gasto en pesos. */
+  mxnPorUsd: number;
   notice(): string | null;
   onToggleVoice(): void;
 }
@@ -164,7 +168,7 @@ export function runTty(o: TtyOptions): Promise<void> {
         spent = readSpent();
         spentAt = now;
       }
-      const footer = footerText({ agent: o.agent, voice: o.voiceOn(), spent, notice: o.notice() });
+      const footer = footerText({ agent: o.agent, voice: o.voiceOn(), spent, mxnPorUsd: o.mxnPorUsd, notice: o.notice() });
       const frame = o.getFrame();
       if (!clear && frame === lastFrame && footer === lastFooter) return;
       const termCols = stdout.columns || 80;

@@ -1,5 +1,6 @@
 import {
   SPEECH_LEAD_IN_MS,
+  formatMxn,
   mouthTimeline,
   parseWav,
   pickExpression,
@@ -16,7 +17,7 @@ import {
   synthesizeSpeech,
   type TtsClient,
 } from '@ascii-avatar/gemini';
-import { loadConfig, saveConfig, type CliConfig } from './config.js';
+import { effectiveDailyLimitUsd, loadConfig, saveConfig, type CliConfig } from './config.js';
 import type { Msg } from './ipc.js';
 import type { AudioPlayer, Playback } from './player.js';
 
@@ -160,7 +161,10 @@ export class PanelController {
     } catch {
       return this.gesture(summary, expression, NOTICE_SPENT_UNREADABLE);
     }
-    if (spent >= this.d.config.dailyLimitUsd) return this.gesture(summary, expression, NOTICE_LIMIT);
+    const limitUsd = effectiveDailyLimitUsd(this.d.config);
+    if (spent >= limitUsd) {
+      return this.gesture(summary, expression, `${NOTICE_LIMIT} (${formatMxn(limitUsd, this.d.config.mxnPorUsd)})`);
+    }
 
     let result;
     try {

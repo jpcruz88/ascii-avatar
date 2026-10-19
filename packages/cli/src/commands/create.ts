@@ -3,10 +3,12 @@ import { join } from 'node:path';
 import {
   BudgetExceededError,
   CREATION_CAP_USD,
+  DEFAULT_MXN_PER_USD,
   FACE_IDS,
   assertWithinCap,
   createAgent,
   decodeImage,
+  formatMxn,
   frameToAnsi,
   imageToAscii,
   loadAgent,
@@ -41,6 +43,8 @@ export interface CreateDeps {
   out: (line: string) => void;
   mode: AsciiMode;
   cols: number;
+  /** Tipo de cambio para mostrar los montos en pesos. Por defecto `DEFAULT_MXN_PER_USD`. */
+  mxnPorUsd?: number;
 }
 
 export interface CreateResult {
@@ -76,11 +80,12 @@ function safeMessage(error: unknown): string {
   return AUTH_FAILURE.test(raw.split('\n')[0] ?? '') ? `${short.replace(/\.$/, '')}. ${KEY_HINT}` : short;
 }
 
-const usd = (n: number): string => n.toFixed(2);
-
 export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
   const { root, name, imageClient, ledger, ask, out } = deps;
   const cap = deps.cap ?? CREATION_CAP_USD;
+  const rate = deps.mxnPorUsd ?? DEFAULT_MXN_PER_USD;
+  /** Los montos se manejan en USD; al usuario se le muestran siempre en pesos. */
+  const mxn = (usd: number): string => formatMxn(usd, rate);
   const agentDir = join(root, 'agents', name);
   const manualHint = (): string =>
     `Gemini rechazó editar la foto (probable filtro de contenido). Puedes aportar tus propias 8 imágenes PNG, ` +
@@ -117,8 +122,8 @@ export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
       photo = await readPhoto(deps.photoPath);
     }
 
-    out(`Estimado: $${usd(estimateCreationCostUsd(missing.length))} USD (tope $${usd(cap)})`);
-    out(`Ya gastado en este agente: $${usd(ledger.spentCreation(name))} USD`);
+    out(`Estimado: ${mxn(estimateCreationCostUsd(missing.length))} (tope ${mxn(cap)})`);
+    out(`Ya gastado en este agente: ${mxn(ledger.spentCreation(name))}`);
     if (!(await ask('¿Generar las caras? (s/N)'))) {
       return { status: 'declined', message: 'Cancelado: no se gastó nada.' };
     }
@@ -129,7 +134,7 @@ export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
 
     /** Una llamada de pago: tope antes, y guardar y registrar el costo justo después. */
     const generate = async (id: FaceId): Promise<Buffer> => {
-      assertWithinCap(ledger.spentCreation(name), ESTIMATED_FACE_COST_USD, cap);
+      assertWithinCap(ledger.spentCreation(name), ESTIMATED_FACE_COST_USD, cap, rate);
       const { image, costUsd, costEstimated } = await generateFace(imageClient, photoBuf, mimeType, id);
       let png: Buffer;
       try {
@@ -138,7 +143,7 @@ export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
       } finally {
         ledger.record('create', name, costUsd); // lo cobrado se registra aunque falle la conversión o el guardado
       }
-      out(`Cara ${id} lista ($${costUsd.toFixed(4)} USD${costEstimated ? ' (estimado)' : ''})`);
+      out(`Cara ${id} lista (${mxn(costUsd)}${costEstimated ? ' (estimado)' : ''})`);
       return png;
     };
 
@@ -166,7 +171,7 @@ export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
     if (config.activeAgent === null) saveConfig(root, { ...config, activeAgent: name });
     return {
       status: 'done',
-      message: `Listo: el agente "${name}" tiene sus ${FACE_IDS.length} caras. Gasto total en creación: $${usd(ledger.spentCreation(name))} USD.`,
+      message: `Listo: el agente "${name}" tiene sus ${FACE_IDS.length} caras. Gasto total en creación: ${mxn(ledger.spentCreation(name))}.`,
     };
   } catch (error) {
     if (error instanceof BudgetExceededError) {
@@ -174,7 +179,7 @@ export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
       return {
         status: 'capped',
         message:
-          `Se alcanzó el tope de creación ($${usd(cap)} USD). Las caras ya generadas quedan guardadas; ` +
+          `Se alcanzó el tope de creación (${mxn(cap)}). Las caras ya generadas quedan guardadas; ` +
           `faltan: ${left.join(', ')}.`,
       };
     }

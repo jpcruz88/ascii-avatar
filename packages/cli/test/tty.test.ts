@@ -49,6 +49,7 @@ function options(stdout: FakeStdout, stdin = new FakeStdin()): TtyOptions {
     getFrame: () => frame,
     voiceOn: () => false,
     spentToday: () => 0,
+    mxnPorUsd: 18.4,
     notice: () => null,
     onToggleVoice: () => undefined,
     stdout: stdout as unknown as NodeJS.WriteStream,
@@ -279,5 +280,18 @@ describe('ritmo de dibujo', () => {
     expect(screens(stdout)).toBe(4); // tras cambiar el tamaño se redibuja siempre
     stdin.emit('data', Buffer.from('q'));
     await done;
+  });
+});
+
+describe('runTty: pie en pesos', () => {
+  it('dibuja el gasto de hoy en pesos con el tipo de cambio de la configuración', async () => {
+    const stdout = new FakeStdout();
+    const stdin = new FakeStdin();
+    const done = runTty({ ...options(stdout, stdin), spentToday: () => 0.1, mxnPorUsd: 20 });
+    stdin.emit('data', Buffer.from('q'));
+    await done;
+    const screen = stdout.writes.join('');
+    expect(screen).toContain('gasto hoy: $2.00 MXN');
+    expect(screen).not.toContain('USD');
   });
 });

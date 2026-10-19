@@ -3,9 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { FACE_IDS, Ledger, loadAgent, missingFaces } from '@ascii-avatar/core';
+import { FACE_IDS, Ledger, formatMxn, loadAgent, missingFaces } from '@ascii-avatar/core';
 import {
-  ESTIMATED_FACE_COST_USD,
   FACE_PROMPTS,
   imageCostUsd,
   ImageRefusedError,
@@ -142,8 +141,8 @@ describe('runCreate: camino feliz', () => {
     const firstCallAt = events.indexOf('call');
     expect(estimateAt).toBeGreaterThanOrEqual(0);
     expect(estimateAt).toBeLessThan(firstCallAt);
-    expect(output()).toContain('(tope $1.60)');
-    expect(output()).toContain(`Estimado: $${(8 * ESTIMATED_FACE_COST_USD).toFixed(2)} USD`);
+    expect(output()).toContain('Estimado: $8.10 MXN (tope $29.44 MXN)');
+    expect(output()).toContain('Ya gastado en este agente: $0.00 MXN');
     // La confirmación también llega antes de gastar.
     const askAt = events.findIndex((e) => e.startsWith('ask:'));
     expect(askAt).toBeLessThan(firstCallAt);
@@ -181,6 +180,25 @@ describe('runCreate: camino feliz', () => {
     const result = await runCreate(makeDeps({ imageClient: client }));
     expect(result.status).toBe('done');
     expect(output()).toContain('(estimado)');
+    // 0.055 USD por cara estimada, en pesos
+    expect(output()).toContain('($1.01 MXN (estimado))');
+  });
+
+  it('todo monto va en pesos: nada de USD ni de montos en dólares', async () => {
+    const result = await runCreate(makeDeps());
+    expect(result.status).toBe('done');
+    const all = `${output()}\n${result.message}`;
+    expect(all).toContain('MXN');
+    expect(all).not.toMatch(/USD/);
+    expect(all).not.toMatch(/\$0\.0\d{1,3}(?!\d| MXN)/); // p. ej. "$0.0357" o "$0.04" sin MXN
+    expect(output()).toContain('Cara mouth_open lista ($0.65 MXN)');
+    expect(result.message).toContain(`Gasto total en creación: ${formatMxn(8 * FACE_COST, 18.4)}.`);
+  });
+
+  it('usa el tipo de cambio recibido', async () => {
+    const result = await runCreate(makeDeps({ mxnPorUsd: 20 }));
+    expect(result.status).toBe('done');
+    expect(output()).toContain('Estimado: $8.80 MXN (tope $32.00 MXN)');
   });
 
   it('con la configuración vacía deja el agente como activo; si ya había uno, no lo toca', async () => {
@@ -230,7 +248,9 @@ describe('runCreate: tope', () => {
     expect(missingFaces(root, 'luna').length).toBeGreaterThan(0);
     expect(calls).toBe(1);
     expect(deps.ledger.spentCreation('luna')).toBeLessThanOrEqual(0.08);
-    expect(output()).toContain('(tope $0.08)');
+    expect(output()).toContain('(tope $1.47 MXN)');
+    expect(result.message).toContain('$1.47 MXN');
+    expect(result.message).not.toMatch(/USD/);
   });
 
   it('cuenta lo ya gastado en corridas anteriores del mismo agente', async () => {
@@ -240,7 +260,8 @@ describe('runCreate: tope', () => {
     expect(result.status).toBe('capped');
     expect(result.message).toContain('tope');
     expect(calls).toBe(0);
-    expect(output()).toContain('1.59');
+    expect(output()).toContain('Ya gastado en este agente: $29.26 MXN');
+    expect(result.message).toContain('$29.44 MXN');
   });
 });
 

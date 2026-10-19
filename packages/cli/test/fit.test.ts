@@ -65,24 +65,42 @@ describe('fitFrame', () => {
 });
 
 describe('footerText', () => {
-  it('muestra agente, voz y gasto con tres decimales', () => {
-    expect(footerText({ agent: 'luna', voice: false, spent: 0, notice: null })).toBe(
-      'luna · voz: off · gasto hoy: $0.000',
+  it('muestra agente, voz y gasto del día en pesos con dos decimales', () => {
+    expect(footerText({ agent: 'luna', voice: false, spent: 0, mxnPorUsd: 18.4, notice: null })).toBe(
+      'luna · voz: off · gasto hoy: $0.00 MXN',
     );
-    expect(footerText({ agent: 'luna', voice: true, spent: 0.0401, notice: null })).toBe(
-      'luna · voz: on · gasto hoy: $0.040',
+    expect(footerText({ agent: 'luna', voice: true, spent: 0.0401, mxnPorUsd: 18.4, notice: null })).toBe(
+      'luna · voz: on · gasto hoy: $0.74 MXN',
     );
+  });
+
+  it('convierte con el tipo de cambio recibido', () => {
+    expect(footerText({ agent: 'luna', voice: true, spent: 0.1, mxnPorUsd: 20, notice: null })).toBe(
+      'luna · voz: on · gasto hoy: $2.00 MXN',
+    );
+  });
+
+  it('no escribe USD ni un monto en dólares', () => {
+    const text = footerText({ agent: 'luna', voice: true, spent: 0.0401, mxnPorUsd: 18.4, notice: null });
+    expect(text).not.toMatch(/USD/);
+    expect(text).not.toContain('$0.040');
   });
 
   it('agrega el aviso al final si hay uno', () => {
     expect(
-      footerText({ agent: 'luna', voice: true, spent: 0.3, notice: 'Límite diario de voz alcanzado' }),
-    ).toBe('luna · voz: on · gasto hoy: $0.300 · Límite diario de voz alcanzado');
+      footerText({
+        agent: 'luna',
+        voice: true,
+        spent: 0.3,
+        mxnPorUsd: 18.4,
+        notice: 'Límite diario de voz alcanzado ($5.52 MXN)',
+      }),
+    ).toBe('luna · voz: on · gasto hoy: $5.52 MXN · Límite diario de voz alcanzado ($5.52 MXN)');
   });
 });
 
 describe('composeScreen', () => {
-  const footer = 'luna · voz: off · gasto hoy: $0.000';
+  const footer = 'luna · voz: off · gasto hoy: $0.00 MXN';
 
   it('coloca el cuadro desde la fila 1 y el pie en la última fila', () => {
     const out = composeScreen({ frame: makeFrame(30, 5), termCols: 60, termRows: 12, footer });
@@ -136,14 +154,14 @@ describe('composeScreen', () => {
 
 describe('footerText sin lectura del gasto', () => {
   it('muestra "?" si no se pudo leer el gasto', () => {
-    expect(footerText({ agent: 'luna', voice: true, spent: null, notice: null })).toBe(
+    expect(footerText({ agent: 'luna', voice: true, spent: null, mxnPorUsd: 18.4, notice: null })).toBe(
       'luna · voz: on · gasto hoy: ?',
     );
   });
 });
 
 describe('composeScreen en modo papel (grabado)', () => {
-  const footer = 'luna · voz: off · gasto hoy: $0.000';
+  const footer = 'luna · voz: off · gasto hoy: $0.00 MXN';
   const ink = `\x1b[38;2;${INK.r};${INK.g};${INK.b}m`;
   const paper = `\x1b[48;2;${PAPER.r};${PAPER.g};${PAPER.b}m`;
   const base = { frame: makeFrame(30, 2), termCols: 60, termRows: 12, footer, paper: true };

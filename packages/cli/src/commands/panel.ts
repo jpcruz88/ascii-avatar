@@ -119,6 +119,7 @@ export async function runPanel(opts: PanelOptions): Promise<number> {
       fast: () => animator.fastFrames(now()),
       voiceOn: () => controller.voiceOn(),
       spentToday: () => controller.spentToday(),
+      mxnPorUsd: config.mxnPorUsd,
       notice: () => controller.notice(),
       onToggleVoice: () => controller.setVoice(!controller.voiceOn()),
     });

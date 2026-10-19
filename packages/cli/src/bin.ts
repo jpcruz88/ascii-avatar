@@ -153,6 +153,7 @@ async function create(args: ParsedArgs, root: string): Promise<number> {
       out: (line) => void process.stdout.write(`${line}\n`),
       mode: config.mode,
       cols: config.cols,
+      mxnPorUsd: config.mxnPorUsd,
     });
     (result.status === 'failed' ? console.error : console.log)(result.message);
     return result.status === 'failed' ? 1 : 0;

@@ -1,12 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DEFAULT_DAILY_LIMIT_USD, type AsciiMode } from '@ascii-avatar/core';
+import { DEFAULT_DAILY_LIMIT_USD, DEFAULT_MXN_PER_USD, type AsciiMode } from '@ascii-avatar/core';
 
 export interface CliConfig {
   activeAgent: string | null;
   voice: boolean;
+  /** Límite diario de voz en USD (el que se compara con el registro de gasto). */
   dailyLimitUsd: number;
+  /** Tipo de cambio para mostrar montos en pesos (MXN por USD). Solo afecta a lo que se muestra. */
+  mxnPorUsd: number;
+  /** Límite diario de voz en pesos. Si está presente y es válido, manda sobre `dailyLimitUsd`. */
+  limiteDiarioMxn?: number;
   mode: AsciiMode;
   cols: number;
 }
@@ -16,6 +21,7 @@ export const DEFAULT_CONFIG: Readonly<CliConfig> = {
   activeAgent: null,
   voice: false,
   dailyLimitUsd: DEFAULT_DAILY_LIMIT_USD,
+  mxnPorUsd: DEFAULT_MXN_PER_USD,
   mode: 'grabado',
   cols: 70,
 };
@@ -49,12 +55,27 @@ export function loadConfig(root: string): CliConfig {
       typeof c.dailyLimitUsd === 'number' && Number.isFinite(c.dailyLimitUsd) && c.dailyLimitUsd >= 0
         ? c.dailyLimitUsd
         : d.dailyLimitUsd,
+    mxnPorUsd:
+      typeof c.mxnPorUsd === 'number' && Number.isFinite(c.mxnPorUsd) && c.mxnPorUsd > 0
+        ? c.mxnPorUsd
+        : d.mxnPorUsd,
+    ...(typeof c.limiteDiarioMxn === 'number' && Number.isFinite(c.limiteDiarioMxn) && c.limiteDiarioMxn >= 0
+      ? { limiteDiarioMxn: c.limiteDiarioMxn }
+      : {}),
     mode: c.mode === 'grabado' || c.mode === 'glyphs' || c.mode === 'halfblock' ? c.mode : d.mode,
     cols:
       typeof c.cols === 'number' && Number.isInteger(c.cols) && c.cols >= 20 && c.cols <= 500
         ? c.cols
         : d.cols,
   };
+}
+
+/**
+ * Límite diario de voz en USD, que es lo que se compara con el registro de gasto. Si hay un
+ * `limiteDiarioMxn` válido manda sobre `dailyLimitUsd` y se convierte con `mxnPorUsd`.
+ */
+export function effectiveDailyLimitUsd(config: CliConfig): number {
+  return config.limiteDiarioMxn === undefined ? config.dailyLimitUsd : config.limiteDiarioMxn / config.mxnPorUsd;
 }
 
 /** Guarda la configuración de forma atómica: archivo temporal en la misma carpeta y renombrado. */

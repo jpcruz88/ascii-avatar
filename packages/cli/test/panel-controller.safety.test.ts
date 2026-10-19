@@ -49,6 +49,7 @@ function setup(usage = { inputTokens: 100, outputTokens: 2000 }) {
     activeAgent: 'luna',
     voice: true,
     dailyLimitUsd: DEFAULT_DAILY_LIMIT_USD,
+    mxnPorUsd: 18.4,
     mode: 'halfblock',
     cols: 70,
   };
