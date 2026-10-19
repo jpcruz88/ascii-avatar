@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { FACE_IDS, loadAgent, missingFaces, type FaceId } from '@ascii-avatar/core';
+import { FACE_IDS, listClips, listPoses, loadAgent, missingFaces, type FaceId } from '@ascii-avatar/core';
 import { loadConfig, saveConfig } from '../src/config.js';
 import { runImportFaces } from '../src/commands/import-faces.js';
 
@@ -184,6 +184,204 @@ describe('runImportFaces', () => {
   });
 });
 
+describe('runImportFaces con --poses y --clips', () => {
+  let posesDir: string;
+  let clipsDir: string;
+
+  beforeEach(() => {
+    posesDir = join(root, 'mis-poses');
+    clipsDir = join(root, 'mis-clips');
+  });
+
+  async function writePoses(ids: string[] = ['look_left', 'tilt_right'], over: Record<string, Buffer> = {}): Promise<void> {
+    mkdirSync(posesDir, { recursive: true });
+    for (const [i, id] of ids.entries()) writeFileSync(join(posesDir, `${id}.png`), over[id] ?? (await solid(300, 400, 30 + i)));
+  }
+
+  async function writeClip(clip: string, files: string[] = ['000.png', '001.png', '002.png'], over: Record<string, Buffer> = {}): Promise<void> {
+    mkdirSync(join(clipsDir, clip), { recursive: true });
+    for (const [i, f] of files.entries()) writeFileSync(join(clipsDir, clip, f), over[f] ?? (await solid(300, 400, 60 + i)));
+  }
+
+  const runWith = (extra: { faces?: boolean; poses?: boolean; clips?: boolean } = {}) =>
+    runImportFaces({
+      root,
+      name: 'ana',
+      ...(extra.faces === false ? {} : { facesDir }),
+      ...(extra.poses ? { posesDir } : {}),
+      ...(extra.clips ? { clipsDir } : {}),
+      out: (s) => lines.push(s),
+    });
+
+  it('importa caras, poses y clips juntos, sin Gemini', async () => {
+    await writeFaces();
+    await writePoses();
+    await writeClip('nod');
+    await writeClip('think', ['000.png', '001.png']);
+    const result = await runWith({ poses: true, clips: true });
+    expect(result.status).toBe('done');
+    expect(listPoses(root, 'ana')).toEqual(['tilt_right', 'look_left']);
+    expect(listClips(root, 'ana')).toEqual({ nod: 3, think: 2 });
+    expect(result.message).toMatch(/2 poses/);
+    expect(result.message).toMatch(/2 clips/);
+    expect(existsSync(join(root, 'ledger.jsonl'))).toBe(false);
+  });
+
+  it('agrega poses a un agente existente sin tocar sus caras ni agent.json', async () => {
+    await writeFaces();
+    await run();
+    const agentJson = readFileSync(join(agentDir(), 'agent.json'), 'utf8');
+    const neutral = readFileSync(join(agentDir(), 'faces', 'neutral.png'));
+    rmSync(facesDir, { recursive: true });
+    await writePoses(['nod_up']);
+    const result = await runWith({ faces: false, poses: true });
+    expect(result.status).toBe('done');
+    expect(listPoses(root, 'ana')).toEqual(['nod_up']);
+    expect(readFileSync(join(agentDir(), 'agent.json'), 'utf8')).toBe(agentJson);
+    expect(readFileSync(join(agentDir(), 'faces', 'neutral.png')).equals(neutral)).toBe(true);
+  });
+
+  it('agrega clips a un agente existente y reemplaza los que tenía', async () => {
+    await writeFaces();
+    await writeClip('nod');
+    await runWith({ clips: true });
+    rmSync(clipsDir, { recursive: true });
+    await writeClip('turn_left');
+    const result = await runWith({ faces: false, clips: true });
+    expect(result.status).toBe('done');
+    expect(listClips(root, 'ana')).toEqual({ turn_left: 3 });
+  });
+
+  it('poses sin caras para un agente que no existe: failed, pide --caras y no escribe nada', async () => {
+    await writePoses();
+    const result = await runWith({ faces: false, poses: true });
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('--caras');
+    expect(existsSync(agentDir())).toBe(false);
+  });
+
+  it('una pose de otro tamaño que las caras: failed, nombra el archivo y no escribe nada', async () => {
+    await writeFaces();
+    await writePoses(['look_left', 'nod_down'], { nod_down: await solid(301, 400, 9) });
+    const result = await runWith({ poses: true });
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('nod_down.png');
+    expect(result.message).toContain('300×400');
+    expect(existsSync(agentDir())).toBe(false);
+  });
+
+  it('el tamaño de referencia de un agente existente son sus caras', async () => {
+    await writeFaces();
+    await run();
+    rmSync(facesDir, { recursive: true });
+    await writePoses(['look_left'], { look_left: await solid(200, 200, 9) });
+    const result = await runWith({ faces: false, poses: true });
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('look_left.png');
+    expect(listPoses(root, 'ana')).toEqual([]);
+  });
+
+  it('una pose que no es PNG o con un nombre desconocido: failed y nombra el archivo', async () => {
+    await writeFaces();
+    const jpeg = await sharp({ create: { width: 300, height: 400, channels: 3, background: '#222' } }).jpeg().toBuffer();
+    await writePoses(['look_left'], { look_left: jpeg });
+    let result = await runWith({ poses: true });
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('look_left.png');
+    expect(result.message).toContain('PNG');
+    rmSync(posesDir, { recursive: true });
+    await writePoses(['look-left']);
+    result = await runWith({ poses: true });
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('look-left.png');
+    expect(result.message).toContain('look_left');
+    expect(existsSync(agentDir())).toBe(false);
+  });
+
+  it('una carpeta de poses sin poses: failed', async () => {
+    await writeFaces();
+    mkdirSync(posesDir, { recursive: true });
+    const result = await runWith({ poses: true });
+    expect(result.status).toBe('failed');
+    expect(existsSync(agentDir())).toBe(false);
+  });
+
+  it('ignora los archivos ocultos y los que no son .png', async () => {
+    await writeFaces();
+    await writePoses(['look_left']);
+    writeFileSync(join(posesDir, '.cost.json'), '{}');
+    writeFileSync(join(posesDir, 'notas.txt'), 'hola');
+    await writeClip('nod');
+    writeFileSync(join(clipsDir, 'nod', '.DS_Store'), 'x');
+    writeFileSync(join(clipsDir, '.DS_Store'), 'x');
+    const result = await runWith({ poses: true, clips: true });
+    expect(result.status).toBe('done');
+    expect(listPoses(root, 'ana')).toEqual(['look_left']);
+    expect(listClips(root, 'ana')).toEqual({ nod: 3 });
+  });
+
+  it('un clip con un hueco en la numeración: failed, dice qué cuadro falta y no escribe nada', async () => {
+    await writeFaces();
+    await writeClip('nod', ['000.png', '001.png', '003.png']);
+    const result = await runWith({ clips: true });
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('nod');
+    expect(result.message).toContain('002.png');
+    expect(existsSync(agentDir())).toBe(false);
+  });
+
+  it('un clip que no empieza en 000 o con nombres raros: failed', async () => {
+    await writeFaces();
+    await writeClip('nod', ['001.png', '002.png']);
+    expect((await runWith({ clips: true })).message).toContain('000.png');
+    rmSync(clipsDir, { recursive: true });
+    await writeClip('nod', ['000.png', 'cuadro1.png']);
+    expect((await runWith({ clips: true })).message).toContain('cuadro1.png');
+    expect(existsSync(agentDir())).toBe(false);
+  });
+
+  it('un clip desconocido, de un solo cuadro o con un cuadro de otro tamaño: failed', async () => {
+    await writeFaces();
+    await writeClip('saludo');
+    let result = await runWith({ clips: true });
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('saludo');
+    expect(result.message).toContain('nod');
+    rmSync(clipsDir, { recursive: true });
+    await writeClip('nod', ['000.png']);
+    result = await runWith({ clips: true });
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('nod');
+    rmSync(clipsDir, { recursive: true });
+    await writeClip('nod', ['000.png', '001.png'], { '001.png': await solid(300, 300, 1) });
+    result = await runWith({ clips: true });
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('001.png');
+    expect(existsSync(agentDir())).toBe(false);
+  });
+
+  it('una carpeta de clips sin subcarpetas de clips (p. ej. un clip suelto): failed y lo explica', async () => {
+    await writeFaces();
+    mkdirSync(clipsDir, { recursive: true });
+    writeFileSync(join(clipsDir, '000.png'), await solid(300, 400, 1));
+    const result = await runWith({ clips: true });
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('nod');
+    expect(existsSync(agentDir())).toBe(false);
+  });
+
+  it('con caras válidas pero clips inválidos no escribe nada, ni siquiera las caras', async () => {
+    await writeFaces();
+    await run();
+    const neutral = readFileSync(join(agentDir(), 'faces', 'neutral.png'));
+    await writeFaces({ neutral: await solid(300, 400, 254) });
+    await writeClip('nod', ['000.png', '002.png']);
+    const result = await runWith({ clips: true });
+    expect(result.status).toBe('failed');
+    expect(readFileSync(join(agentDir(), 'faces', 'neutral.png')).equals(neutral)).toBe(true);
+  });
+});
+
 describe('avatar create --caras (proceso real)', () => {
   const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
   const distBin = fileURLToPath(new URL('../dist/bin.js', import.meta.url));
@@ -211,6 +409,14 @@ describe('avatar create --caras (proceso real)', () => {
     expect(existsSync(join(root, 'secrets.json'))).toBe(false);
     expect(existsSync(join(root, 'ledger.jsonl'))).toBe(false);
     expect(loadConfig(root).activeAgent).toBe('ana');
+    // Poses solas en un agente que ya existe: tampoco pide foto ni llave.
+    const posesDir = join(root, 'mis-poses');
+    mkdirSync(posesDir, { recursive: true });
+    writeFileSync(join(posesDir, 'look_left.png'), await solid(300, 400, 77));
+    const poses = bin('ana', '--poses', posesDir);
+    expect(poses.status).toBe(0);
+    expect(listPoses(root, 'ana')).toEqual(['look_left']);
+    expect(bin('ana', '--clips').status).toBe(1);
   }, 120_000);
 
   it('--caras sin valor es un error de uso', () => {

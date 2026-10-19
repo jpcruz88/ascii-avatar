@@ -43,6 +43,14 @@ describe('parseArgs', () => {
     expect(() => parseArgs(['create', 'ana', '--caras'])).toThrow('--caras');
   });
 
+  it('--poses y --clips llevan un valor y son de create', () => {
+    expect(parseArgs(['create', 'ana', '--poses', './p', '--clips', './c']).flags).toEqual({ poses: './p', clips: './c' });
+    expect(() => parseArgs(['create', 'ana', '--poses'])).toThrow('--poses');
+    expect(() => parseArgs(['create', 'ana', '--clips'])).toThrow('--clips');
+    expect(unknownFlags('create', { caras: './x', poses: './p', clips: './c' })).toEqual([]);
+    expect(unknownFlags('panel', { poses: './p' })).toEqual(['poses']);
+  });
+
   it('voz: --voz y --estilo llevan un valor', () => {
     expect(parseArgs(['voz', 'preciado', '--voz', 'Algenib', '--estilo', 'grave y pausada'])).toEqual({
       cmd: 'voz',

@@ -11,8 +11,12 @@ const HELP = `avatar: avatar ASCII animado para la terminal.
 
 Uso:
   avatar create <nombre> [--foto <ruta>]   Crea un agente a partir de una foto (usa Gemini)
-  avatar create <nombre> --caras <carpeta> [--foto <ruta>]
-                                           Importa tus propias 8 caras PNG (sin Gemini, sin llave, sin costo)
+  avatar create <nombre> --caras <carpeta> [--foto <ruta>] [--poses <carpeta>] [--clips <carpeta>]
+                                           Importa tus propias 8 caras PNG y, si quieres, poses y clips
+                                           de movimiento (sin Gemini, sin llave, sin costo)
+  avatar create <nombre> --poses <carpeta> | --clips <carpeta>
+                                           Agrega o reemplaza las poses o los clips de un agente que ya
+                                           existe, sin tocar sus caras
   avatar panel [--agente <nombre>] [--cols <n>] [--modo grabado|glyphs|halfblock]
                                            Abre el panel (tecla v: voz, q: salir)
   avatar voice on|off                      Activa o desactiva la voz
@@ -71,8 +75,15 @@ function readStdin(maxBytes: number, waitMs: number): Promise<string> {
   });
 }
 
-/** `avatar create <nombre> --caras <carpeta>`: no toca Gemini ni pide llave. */
-async function importFaces(name: string, facesDir: string, photo: string | true | undefined, root: string): Promise<number> {
+/** Carpetas a importar con `avatar create`: caras, poses y clips (todas opcionales por separado). */
+interface ImportDirs {
+  caras?: string;
+  poses?: string;
+  clips?: string;
+}
+
+/** `avatar create <nombre> --caras|--poses|--clips <carpeta>`: no toca Gemini ni pide llave. */
+async function importFaces(name: string, dirs: ImportDirs, photo: string | true | undefined, root: string): Promise<number> {
   if (photo === true) return fail('Falta la ruta después de --foto.');
   try {
     const { validateAgentName } = await import('@ascii-avatar/core');
@@ -82,7 +93,9 @@ async function importFaces(name: string, facesDir: string, photo: string | true 
     const result = await runImportFaces({
       root,
       name,
-      facesDir: cleanPath(facesDir),
+      ...(dirs.caras === undefined ? {} : { facesDir: cleanPath(dirs.caras) }),
+      ...(dirs.poses === undefined ? {} : { posesDir: cleanPath(dirs.poses) }),
+      ...(dirs.clips === undefined ? {} : { clipsDir: cleanPath(dirs.clips) }),
       ...(photo === undefined ? {} : { photoPath: cleanPath(photo) }),
       out: (line) => void process.stdout.write(`${line}\n`),
     });
@@ -95,10 +108,21 @@ async function importFaces(name: string, facesDir: string, photo: string | true 
 
 async function create(args: ParsedArgs, root: string): Promise<number> {
   const [name] = args.positionals;
-  if (name === undefined) return fail('Uso: avatar create <nombre> [--foto <ruta>] [--caras <carpeta>]');
-  const { caras } = args.flags;
-  if (caras === true) return fail('Falta la carpeta después de --caras.');
-  if (caras !== undefined) return importFaces(name, caras, args.flags.foto, root);
+  if (name === undefined) {
+    return fail('Uso: avatar create <nombre> [--foto <ruta>] [--caras <carpeta>] [--poses <carpeta>] [--clips <carpeta>]');
+  }
+  const { caras, poses, clips } = args.flags;
+  for (const [flag, value] of [['caras', caras], ['poses', poses], ['clips', clips]] as const) {
+    if (value === true) return fail(`Falta la carpeta después de --${flag}.`);
+  }
+  if (caras !== undefined || poses !== undefined || clips !== undefined) {
+    const dirs: ImportDirs = {
+      ...(typeof caras === 'string' ? { caras } : {}),
+      ...(typeof poses === 'string' ? { poses } : {}),
+      ...(typeof clips === 'string' ? { clips } : {}),
+    };
+    return importFaces(name, dirs, args.flags.foto, root);
+  }
   const { existsSync } = await import('node:fs');
   const { Ledger, loadApiKey, saveApiKey, validateAgentName } = await import('@ascii-avatar/core');
   const { createGeminiImageClient, loadGeminiConfig } = await import('@ascii-avatar/gemini');
