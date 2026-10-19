@@ -7,6 +7,12 @@ import { ttsCostUsd } from '@ascii-avatar/gemini';
 import type { CliConfig } from '../src/config.js';
 import { PanelController } from '../src/panel-controller.js';
 
+/** Programador de pruebas: arranca el audio en el acto, sin esperar el avance de la expresión. */
+const runNow = (_ms: number, fn: () => void): (() => void) => {
+  fn();
+  return () => undefined;
+};
+
 /** WAV PCM16 mono de 1 s a 24 kHz con una onda cuadrada. */
 function makeWav(): Buffer {
   const n = 24000;
@@ -60,6 +66,7 @@ function setup(usage = { inputTokens: 100, outputTokens: 2000 }) {
     config,
     agent: 'luna',
     now: () => 1000,
+    schedule: runNow,
   });
   return { controller, ledger, tts, play, say, config };
 }

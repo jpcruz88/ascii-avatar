@@ -1,4 +1,5 @@
 import {
+  SPEECH_LEAD_IN_MS,
   mouthTimeline,
   parseWav,
   pickExpression,
@@ -45,12 +46,24 @@ export interface PanelControllerDeps {
   voiceStyle?: string;
   /** Reloj monótono en ms que arranca cerca de 0 (`performance.now`); es el que consume el animador. */
   now: () => number;
+  /**
+   * Programa `fn` dentro de `ms` milisegundos y devuelve con qué cancelarlo. Por defecto `setTimeout`;
+   * en pruebas se inyecta uno controlable.
+   */
+  schedule?: (ms: number, fn: () => void) => () => void;
 }
+
+const defaultSchedule = (ms: number, fn: () => void): (() => void) => {
+  const timer = setTimeout(fn, ms);
+  return () => clearTimeout(timer);
+};
 
 /** Une mensajes del canal, animador, voz y gasto. `handle` procesa de a un mensaje, en orden de llegada. */
 export class PanelController {
   private queue: Promise<void> = Promise.resolve();
   private playback: Playback | null = null;
+  /** Cancela el arranque de audio que espera a que termine el avance de la expresión. */
+  private cancelPendingStart: (() => void) | null = null;
   private current: { text: string; untilMs: number } | null = null;
   /** Se cerró el panel: no se reproduce ni se anima nada más. */
   private closed = false;
@@ -98,8 +111,10 @@ export class PanelController {
     this.stopAudio();
   }
 
-  /** Detiene el audio en curso. */
+  /** Detiene el audio en curso y cancela el que estaba por arrancar. */
   stopAudio(): void {
+    this.cancelPendingStart?.();
+    this.cancelPendingStart = null;
     this.playback?.stop();
     this.playback = null;
   }
@@ -167,11 +182,36 @@ export class PanelController {
       const { sampleRate, samples } = parseWav(result.wav);
       steps = mouthTimeline(samples, sampleRate);
       durationMs = (samples.length / sampleRate) * 1000;
-      this.startPlayback(result.wav);
     } catch {
       return this.gesture(summary, expression, NOTICE_PLAYER_FAILED);
     }
     this.d.animator.say(this.d.now(), { steps, durationMs, expression });
+    this.schedulePlayback(result.wav);
+  }
+
+  /**
+   * El animador muestra primero la expresión (`SPEECH_LEAD_IN_MS`) y luego mueve la boca desde el
+   * inicio del audio: el audio arranca justo entonces para que boca y voz vayan juntas.
+   */
+  private schedulePlayback(wav: Buffer): void {
+    const schedule = this.d.schedule ?? defaultSchedule;
+    const pending = { cancelled: false, started: false, cancelTimer: (): void => undefined };
+    const cancel = (): void => {
+      pending.cancelled = true;
+      pending.cancelTimer();
+    };
+    this.cancelPendingStart = cancel;
+    pending.cancelTimer = schedule(SPEECH_LEAD_IN_MS, () => {
+      if (pending.cancelled || pending.started || this.closed) return;
+      pending.started = true;
+      if (this.cancelPendingStart === cancel) this.cancelPendingStart = null;
+      try {
+        this.startPlayback(wav);
+      } catch {
+        // La boca ya se mueve con el audio: sigue sin sonido, como un gesto.
+        this.setNotice(NOTICE_PLAYER_FAILED);
+      }
+    });
   }
 
   private startPlayback(wav: Buffer): void {

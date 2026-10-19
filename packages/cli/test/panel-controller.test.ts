@@ -2,11 +2,17 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Animator, DEFAULT_DAILY_LIMIT_USD, Ledger } from '@ascii-avatar/core';
+import { Animator, DEFAULT_DAILY_LIMIT_USD, Ledger, SPEECH_LEAD_IN_MS } from '@ascii-avatar/core';
 import { SpeechRefusedError, ttsCostUsd, type TtsClient } from '@ascii-avatar/gemini';
 import { loadConfig, saveConfig, type CliConfig } from '../src/config.js';
 import { PanelController } from '../src/panel-controller.js';
 import type { AudioPlayer } from '../src/player.js';
+
+/** Programador de pruebas: arranca el audio en el acto, sin esperar el avance de la expresión. */
+const runNow = (_ms: number, fn: () => void): (() => void) => {
+  fn();
+  return () => undefined;
+};
 
 /** WAV PCM16 mono con `n` muestras de una onda cuadrada. */
 function makeWav(n: number, sampleRate = 24000): Buffer {
@@ -53,7 +59,9 @@ interface Setup {
   say: ReturnType<typeof vi.spyOn>;
 }
 
-function setup(over: { voice?: boolean; tts?: TtsClient | null } = {}): Setup {
+function setup(
+  over: { voice?: boolean; tts?: TtsClient | null; schedule?: (ms: number, fn: () => void) => () => void } = {},
+): Setup {
   const config: CliConfig = {
     activeAgent: 'luna',
     voice: over.voice ?? true,
@@ -83,6 +91,7 @@ function setup(over: { voice?: boolean; tts?: TtsClient | null } = {}): Setup {
     config,
     agent: 'luna',
     now: () => nowMs,
+    schedule: over.schedule ?? runNow,
   });
   return { controller, animator, ledger, config, tts, play, stops, say };
 }
@@ -284,5 +293,65 @@ describe('PanelController', () => {
     expect(s.controller.notice()).not.toBeNull();
     nowMs += 60_000;
     expect(s.controller.notice()).toBeNull();
+  });
+});
+
+describe('PanelController: el audio va junto con la boca', () => {
+  /** Programador manual: guarda cada tarea con su espera para correrla cuando la prueba quiera. */
+  function manual() {
+    const tasks: { ms: number; fn: () => void; cancel: ReturnType<typeof vi.fn> }[] = [];
+    const schedule = (ms: number, fn: () => void): (() => void) => {
+      const cancel = vi.fn();
+      tasks.push({ ms, fn, cancel });
+      return cancel;
+    };
+    return { tasks, schedule };
+  }
+
+  it('el audio empieza al terminar el avance de la expresión, cuando la boca empieza a moverse', async () => {
+    const m = manual();
+    const s = setup({ schedule: m.schedule });
+    await s.controller.handle({ type: 'say', text: PROSE });
+    expect(s.say).toHaveBeenCalledTimes(1);
+    expect(s.play).not.toHaveBeenCalled();
+    expect(m.tasks).toHaveLength(1);
+    expect(m.tasks[0]!.ms).toBe(SPEECH_LEAD_IN_MS);
+    m.tasks[0]!.fn();
+    expect(s.play).toHaveBeenCalledTimes(1);
+    expect(s.play).toHaveBeenCalledWith(WAV);
+  });
+
+  it('un say nuevo antes de que arranque el audio cancela el arranque pendiente', async () => {
+    const m = manual();
+    const s = setup({ schedule: m.schedule });
+    await s.controller.handle({ type: 'say', text: PROSE });
+    await s.controller.handle({ type: 'say', text: 'Otra cosa distinta, ya está.' });
+    expect(m.tasks[0]!.cancel).toHaveBeenCalledTimes(1);
+    m.tasks[0]!.fn(); // aunque el temporizador llegara a dispararse, no suena
+    expect(s.play).not.toHaveBeenCalled();
+    m.tasks[1]!.fn();
+    expect(s.play).toHaveBeenCalledTimes(1);
+  });
+
+  it('cerrar el panel antes de que arranque el audio lo cancela', async () => {
+    const m = manual();
+    const s = setup({ schedule: m.schedule });
+    await s.controller.handle({ type: 'say', text: PROSE });
+    s.controller.close();
+    expect(m.tasks[0]!.cancel).toHaveBeenCalledTimes(1);
+    m.tasks[0]!.fn();
+    expect(s.play).not.toHaveBeenCalled();
+  });
+
+  it('si el reproductor falla al arrancar, avisa y la boca sigue sin sonido', async () => {
+    const m = manual();
+    const s = setup({ schedule: m.schedule });
+    s.play.mockImplementationOnce(() => {
+      throw new Error('afplay no existe');
+    });
+    await s.controller.handle({ type: 'say', text: PROSE });
+    expect(() => m.tasks[0]!.fn()).not.toThrow();
+    expect(s.controller.notice()).toMatch(/audio/i);
+    expect(s.say).toHaveBeenCalledTimes(1);
   });
 });
