@@ -108,7 +108,7 @@ Por defecto el agente sale en **estilo grabado**: un retrato en blanco y negro, 
 4. **El resto.** Si apruebas, genera las otras siete caras y luego las ocho poses. Cada imagen se guarda en disco como PNG y se registra su costo apenas termina. Si Gemini entrega una cara o pose de otro tamaño que el grabado base, se ajusta a ese lienzo (centrada, con relleno blanco) y te avisa con su tamaño original; si se ve desalineada, borra ese archivo y vuelve a correr el comando para regenerarla.
 5. **Tope.** Antes de cada imagen comprueba el tope de creación del agente ($29.44 MXN, de sobra para las 16). Si se fuera a pasar, se detiene, avisa qué falta y deja guardado lo ya generado.
 
-Al terminar te muestra un resumen y te sugiere `avatar movimientos <nombre>` para sumar clips de movimiento suaves.
+Al terminar te muestra un resumen y te sugiere `avatar movimientos <nombre>`, que genera en tu equipo y sin costo los seis clips de movimiento de cabeza a partir del grabado base (requiere instalar LivePortrait una vez; ver [Movimientos fluidos](#movimientos-fluidos-opcional-gratis)).
 
 Opciones:
 

@@ -278,7 +278,8 @@ export async function runCreate(deps: CreateDeps): Promise<CreateResult> {
         message:
           `Listo: el agente "${name}" tiene ${what} en estilo grabado. ` +
           `Gasto total en creación: ${mxn(ledger.spentCreation(name))}.\n` +
-          `Para que se mueva con suavidad (clips de movimiento), corre: avatar movimientos ${name}`,
+          `Opcional: para movimientos fluidos (6 clips de cabeza, generados en tu equipo y sin costo; ` +
+          `requiere LivePortrait instalado, ver el README), corre: avatar movimientos ${name}`,
       };
     }
 

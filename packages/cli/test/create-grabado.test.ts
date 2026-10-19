@@ -202,6 +202,9 @@ describe('runCreate grabado: camino feliz', () => {
     expect(result.message).toContain('8 caras y 8 poses');
     expect(result.message).toContain(`Gasto total en creación: ${formatMxn(16 * FACE_COST, 18.4)}.`);
     expect(result.message).toContain('avatar movimientos luna');
+    // La sugerencia describe bien el comando: local, sin costo y con LivePortrait instalado.
+    expect(result.message).toContain('sin costo');
+    expect(result.message).toContain('LivePortrait');
   });
 
   it('una pose que llega con otro tamaño se guarda en el lienzo del grabado base', async () => {
