@@ -221,6 +221,56 @@ describe('caché de cuadros convertidos', () => {
     expect(c.neutral.cells[0]!.ch).toBe('▀');
   });
 
+  it('los cuadros recién convertidos comparten los objetos de color iguales (poca memoria)', async () => {
+    await agentWithFaces();
+    savePoses(root, 'luna', { look_left: await solid(200) });
+    for (const cache of [false, true]) {
+      const atlas = await loadAtlas(root, 'luna', { cols: 4, mode: 'grabado', cache });
+      const a = atlas.neutral.cells;
+      const b = atlas['pose:look_left']!.cells;
+      expect(a[0]!.fg).toEqual(a[1]!.fg);
+      expect(a[0]!.fg).toBe(a[1]!.fg);
+      expect(a[0]!.fg).toBe(b[0]!.fg);
+      if (a[0]!.bg !== null) expect(a[0]!.bg).toBe(atlas.smile.cells[3]!.bg);
+    }
+  });
+
+  it('una caché de otra versión no se reutiliza', async () => {
+    await agentWithFaces();
+    const file = join(dir(), 'poses', 'look_left.png');
+    savePoses(root, 'luna', { look_left: await stored(0) });
+    const mtime = new Date(1_700_000_000_000);
+    utimesSync(file, mtime, mtime);
+    await loadAtlas(root, 'luna', { cols: 4, mode: 'glyphs' });
+    writeFileSync(file, await stored(240));
+    utimesSync(file, mtime, mtime);
+    const cacheFile = join(dir(), '.cache', readdirSync(join(dir(), '.cache'))[0]!);
+    const raw = readFileSync(cacheFile, 'latin1');
+    expect(raw).toContain('"version":1');
+    writeFileSync(cacheFile, Buffer.from(raw.replace('"version":1', '"version":9'), 'latin1'));
+    const fresh = await loadAtlas(root, 'luna', { cols: 4, mode: 'glyphs' });
+    expect(fresh['pose:look_left']!.cells[0]!.ch).toBe('%');
+  });
+
+  it('un cuadro guardado que se infla de más que su tamaño cuenta como fallo y se reconvierte', async () => {
+    await agentWithFaces();
+    const first = await loadAtlas(root, 'luna', { cols: 4, mode: 'glyphs' });
+    const cacheFile = join(dir(), '.cache', readdirSync(join(dir(), '.cache'))[0]!);
+    const raw = readFileSync(cacheFile, 'latin1');
+    // El encabezado dice que cada cuadro tiene 1 fila; los datos tienen más.
+    writeFileSync(cacheFile, Buffer.from(raw.replaceAll(/"rows":\d+/g, '"rows":1'), 'latin1'));
+    expect(await loadAtlas(root, 'luna', { cols: 4, mode: 'glyphs' })).toEqual(first);
+  });
+
+  it('conserva solo los 3 archivos de caché más recientes por agente', async () => {
+    await agentWithFaces();
+    for (const cols of [4, 5, 6, 7]) await loadAtlas(root, 'luna', { cols, mode: 'glyphs' });
+    const files = readdirSync(join(dir(), '.cache')).sort();
+    expect(files).toHaveLength(3);
+    expect(files).toContain('atlas-glyphs-7.bin');
+    expect(files).not.toContain('atlas-glyphs-4.bin');
+  });
+
   it('una caché dañada se ignora y se rehace', async () => {
     await agentWithFaces();
     const first = await loadAtlas(root, 'luna', { cols: 4, mode: 'glyphs' });

@@ -6,8 +6,8 @@
 // Cada cuadro es una celda tras otra de 9 bytes (código UTF-16 del carácter, frente r g b, si hay
 // fondo, fondo r g b), comprimido con deflate. Cada cuadro guarda la clave con que se hizo (fecha y
 // tamaño de sus archivos, columnas, modo y tono); quien lee solo usa los que coinciden.
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import type { GrabadoTone } from '../ascii/convert.js';
 import type { AsciiFrame, Cell, Rgb } from '../ascii/types.js';
@@ -15,8 +15,13 @@ import { writeFileAtomic } from './atomic.js';
 
 const MAGIC = 'AAC1';
 const CELL_BYTES = 9;
+/** Archivos de caché (uno por modo y ancho) que se conservan por agente; los más viejos se borran. */
+export const CACHE_FILES_KEPT = 3;
+const CACHE_FILE_RE = /^atlas-.+\.bin$/;
 
 export interface CacheMeta {
+  /** Versión del formato y de la conversión: una caché de otra versión no se usa. */
+  version: number;
   /** Fecha y tamaño de las 8 caras: si no cambian, el tono guardado sigue valiendo. */
   facesSig: string;
   tone: GrabadoTone | null;
@@ -39,8 +44,12 @@ export interface AtlasCache {
   get(id: string, key: string): AsciiFrame | undefined;
 }
 
-/** Lee la caché; si no existe o está dañada devuelve `undefined` (se rehará). Nunca lanza. */
-export function readAtlasCache(file: string): AtlasCache | undefined {
+/**
+ * Lee la caché; si no existe, está dañada o es de otra `version` devuelve `undefined` (se rehará).
+ * Los colores de los cuadros leídos se toman de `colors` (compartidos con los recién convertidos).
+ * Nunca lanza.
+ */
+export function readAtlasCache(file: string, version: number, colors: Map<number, Rgb> = new Map()): AtlasCache | undefined {
   try {
     if (!existsSync(file)) return undefined;
     const buf = readFileSync(file);
@@ -50,10 +59,11 @@ export function readAtlasCache(file: string): AtlasCache | undefined {
       meta: CacheMeta;
       frames: FrameRecord[];
     };
-    if (typeof header.meta?.facesSig !== 'string' || !Array.isArray(header.frames)) return undefined;
+    if (header.meta?.version !== version || typeof header.meta.facesSig !== 'string' || !Array.isArray(header.frames)) {
+      return undefined;
+    }
     const payload = buf.subarray(8 + headerLength);
     const records = new Map(header.frames.map((f) => [f.id, f]));
-    const colors = new Map<number, Rgb>();
     return {
       meta: header.meta,
       size: records.size,
@@ -61,7 +71,10 @@ export function readAtlasCache(file: string): AtlasCache | undefined {
         const record = records.get(id);
         if (record === undefined || record.key !== key) return undefined;
         try {
-          return decodeFrame(record, inflateRawSync(payload.subarray(record.offset, record.offset + record.length)), colors);
+          // Un cuadro que se infla a más de lo que dice su encabezado está dañado: cuenta como fallo.
+          const maxOutputLength = Math.max(1, record.cols * record.rows * CELL_BYTES);
+          const raw = inflateRawSync(payload.subarray(record.offset, record.offset + record.length), { maxOutputLength });
+          return decodeFrame(record, raw, colors);
         } catch {
           return undefined;
         }
@@ -95,6 +108,28 @@ export function writeAtlasCache(
   head.writeUInt32LE(header.length, 4);
   mkdirSync(dirname(file), { recursive: true });
   writeFileAtomic(file, Buffer.concat([head, header, ...chunks]));
+  pruneCache(dirname(file), basename(file));
+}
+
+/** Deja en `dir` solo los `CACHE_FILES_KEPT` archivos de caché más recientes (siempre `keep`). */
+function pruneCache(dir: string, keep: string): void {
+  const others = readdirSync(dir)
+    .filter((f) => CACHE_FILE_RE.test(f) && f !== keep)
+    .map((f) => ({ f, at: statSync(join(dir, f)).mtimeMs }))
+    .sort((a, b) => b.at - a.at);
+  for (const { f } of others.slice(CACHE_FILES_KEPT - 1)) rmSync(join(dir, f), { force: true });
+}
+
+/**
+ * Reemplaza los colores de las celdas por objetos compartidos de `colors` (uno por color): un cuadro
+ * recién convertido trae un objeto por celda, y con decenas de cuadros eso son cientos de MB.
+ */
+export function internColors(frame: AsciiFrame, colors: Map<number, Rgb>): AsciiFrame {
+  for (const cell of frame.cells) {
+    cell.fg = color(colors, cell.fg.r, cell.fg.g, cell.fg.b);
+    if (cell.bg !== null) cell.bg = color(colors, cell.bg.r, cell.bg.g, cell.bg.b);
+  }
+  return frame;
 }
 
 function encodeFrame(frame: AsciiFrame): Buffer | undefined {

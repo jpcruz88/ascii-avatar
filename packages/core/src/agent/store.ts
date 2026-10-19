@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { decodeImage } from '../ascii/decode.js';
 import { grabadoTone, imageToAscii, type GrabadoTone } from '../ascii/convert.js';
-import type { AsciiFrame, AsciiMode, RawImage } from '../ascii/types.js';
+import type { AsciiFrame, AsciiMode, RawImage, Rgb } from '../ascii/types.js';
 import { blendImages } from '../ascii/blend.js';
 import {
   CLIP_IDS,
@@ -23,7 +23,7 @@ import {
   type PoseFrameId,
   type PoseId,
 } from '../faces.js';
-import { readAtlasCache, writeAtlasCache, type AtlasCache } from './atlas-cache.js';
+import { internColors, readAtlasCache, writeAtlasCache, type AtlasCache } from './atlas-cache.js';
 import { writeFileAtomic } from './atomic.js';
 import { CLIPS_DIR, POSES_DIR, clipFrameFile, clipsIn, posesIn, replaceDir } from './motion.js';
 
@@ -365,18 +365,23 @@ export async function loadAtlas(
   };
 
   const cacheFile = join(dir, '.cache', `atlas-${mode}-${cols}.bin`);
-  const cache: AtlasCache | undefined = useCache ? readAtlasCache(cacheFile) : undefined;
+  // Un solo objeto por color para todos los cuadros (leídos de la caché o recién convertidos).
+  const colors = new Map<number, Rgb>();
+  const cache: AtlasCache | undefined = useCache ? readAtlasCache(cacheFile, CACHE_VERSION, colors) : undefined;
   const facesSig = FACE_IDS.map((id) => fileSig(facePath(id))).join('|');
   let tone: GrabadoTone | null = null;
   if (mode === 'grabado') {
     tone =
-      cache !== undefined && cache.meta.facesSig === facesSig && cache.meta.tone !== null
+      cache !== undefined &&
+      cache.meta.version === CACHE_VERSION &&
+      cache.meta.facesSig === facesSig &&
+      cache.meta.tone !== null
         ? cache.meta.tone
         : grabadoTone(await Promise.all(FACE_IDS.map(face)), cols);
   }
   const toneHash = sha(JSON.stringify(tone));
   const convert = (img: RawImage): AsciiFrame =>
-    imageToAscii(img, { cols, mode, ...(tone === null ? {} : { tone }) });
+    internColors(imageToAscii(img, { cols, mode, ...(tone === null ? {} : { tone }) }), colors);
 
   const reference = pngSize(readFileSync(facePath('neutral')));
   /** Decodifica un archivo opcional; `undefined` si está dañado o no mide lo mismo que las caras. */
@@ -457,7 +462,7 @@ export async function loadAtlas(
   }
   if (useCache && dirty) {
     try {
-      writeAtlasCache(cacheFile, { facesSig, tone }, [...frames].map(([id, { key, frame }]) => ({ id, key, frame })));
+      writeAtlasCache(cacheFile, { version: CACHE_VERSION, facesSig, tone }, [...frames].map(([id, { key, frame }]) => ({ id, key, frame })));
     } catch {
       // Sin caché el panel funciona igual, solo abre más despacio.
     }
