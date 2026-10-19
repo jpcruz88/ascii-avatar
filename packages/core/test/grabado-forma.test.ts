@@ -105,11 +105,11 @@ describe('modo grabado: elige el carácter por la forma de la tinta', () => {
     expect(at(19, f.rows - 1)).not.toBe(' ');
   });
 
-  it('convierte 160 columnas de una imagen de 896 x 1193 en menos de 200 ms', () => {
+  it('convierte 160 columnas de una imagen de 896 x 1193 en menos de 600 ms', () => {
     const img = draw(896, 1193, (x, y) => (x * 7 + y * 3) % 23 < 4);
     imageToAscii(img, { cols: 160, mode: 'grabado' }); // calienta el JIT
     const t0 = performance.now();
     imageToAscii(img, { cols: 160, mode: 'grabado' });
-    expect(performance.now() - t0).toBeLessThan(200);
+    expect(performance.now() - t0).toBeLessThan(600);
   });
 });

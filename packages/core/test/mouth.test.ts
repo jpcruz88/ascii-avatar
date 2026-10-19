@@ -37,6 +37,38 @@ function triangle(ms: number, peak: number): Float32Array {
   return out;
 }
 
+/**
+ * Envolvente parecida a la de una voz de TTS: palabras de 2 a 4 sílabas que no llegan a cerrar
+ * entre sí, una sílaba acentuada por palabra con un golpe corto más fuerte (una oclusiva) y
+ * silencios cortos entre palabras y largos cada cinco. Determinista (LCG con semilla fija).
+ */
+function speechLike(seed = 1): Float32Array {
+  let s = seed;
+  const rnd = (): number => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 2 ** 32;
+  };
+  const out: number[] = [];
+  for (let w = 0; w < 18; w++) {
+    const count = 2 + Math.floor(rnd() * 3);
+    const stressed = Math.floor(rnd() * count);
+    for (let k = 0; k < count; k++) {
+      const ms = 130 + rnd() * 110;
+      const peak = k === stressed ? 0.8 + rnd() * 0.1 : 0.55 + rnd() * 0.2;
+      const n = Math.round((ms / 1000) * RATE);
+      for (let i = 0; i < n; i++) {
+        const u = i / n;
+        const burst = k === stressed && u > 0.3 && u < 0.3 + 40 / ms ? 1.45 : 1;
+        const env = burst * peak * (0.45 + 0.55 * Math.sin(Math.PI * u) ** 0.6);
+        out.push(0.4 * env * Math.sin((2 * Math.PI * 160 * out.length) / RATE));
+      }
+    }
+    const gapMs = w % 5 === 4 ? 450 : 40 + rnd() * 60;
+    for (let i = 0; i < Math.round((gapMs / 1000) * RATE); i++) out.push(0);
+  }
+  return Float32Array.from(out);
+}
+
 function levels(steps: MouthStep[]): MouthLevel[] {
   return steps.map((s) => s.level);
 }
@@ -161,6 +193,35 @@ describe('mouthTimeline', () => {
   it('es determinista', () => {
     const samples = concat(sine(500, 0.7), sine(300, 0.2), sine(400, 0.05), triangle(300, 0.4));
     expect(mouthTimeline(samples, RATE)).toEqual(mouthTimeline(samples, RATE));
+  });
+
+  it('una muestra NaN o infinita cuenta como silencio y no congela la boca', () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY]) {
+      const voice = sine(400, 0.3);
+      voice[Math.round(voice.length / 2)] = bad;
+      const steps = mouthTimeline(concat(voice, dc(500, 0), sine(400, 0.3), dc(500, 0)), RATE);
+      expectWellFormed(steps);
+      // Tras la muestra mala la boca sigue moviéndose: cierra en el silencio, abre con la segunda
+      // voz y vuelve a cerrar al final.
+      expect(steps.some((s) => s.tMs >= 400 && s.tMs < 900 && s.level === 0)).toBe(true);
+      expect(steps.some((s) => s.tMs >= 900 && s.tMs < 1300 && s.level >= 3)).toBe(true);
+      expect(steps.at(-1)!.level).toBe(0);
+    }
+  });
+
+  it('una voz con dinámica de habla real llega a los niveles 3 y 4 y no se queda en el 2', () => {
+    const samples = speechLike();
+    const totalMs = (samples.length / RATE) * 1000;
+    const steps = mouthTimeline(samples, RATE);
+    expectWellFormed(steps);
+    const time = [0, 0, 0, 0, 0];
+    runLengths(steps, totalMs).forEach((ms, i) => (time[steps[i]!.level] += ms));
+    const voiced = time[1]! + time[2]! + time[3]! + time[4]!;
+    expect(time[3]).toBeGreaterThan(0);
+    expect(time[4]).toBeGreaterThan(0);
+    // Las sílabas acentuadas abren de verdad: entre 3 y 4 pasan buena parte del tiempo con voz.
+    expect((time[3]! + time[4]!) / voiced).toBeGreaterThanOrEqual(0.4);
+    expect(time[2]! / voiced).toBeLessThanOrEqual(0.6);
   });
 
   it('usa ventanas de 20 ms sea cual sea la frecuencia de muestreo', () => {

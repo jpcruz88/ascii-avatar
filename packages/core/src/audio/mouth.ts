@@ -15,8 +15,12 @@ const WINDOW_MS = 20;
 export const MOUTH_MIN_HOLD_MS = 60;
 /** RMS absoluto por debajo del cual una ventana es silencio (boca cerrada). */
 const NOISE_FLOOR = 0.005;
-/** Percentil del RMS de las ventanas con sonido que cuenta como «abierta del todo». */
-const REFERENCE_PERCENTILE = 0.95;
+/**
+ * Percentil del RMS de las ventanas con sonido que cuenta como «abierta del todo». Con el 95 los
+ * golpes de las oclusivas fijaban la referencia y la voz normal se quedaba en el nivel 2; con el
+ * 85 las sílabas acentuadas llegan a 3 y 4.
+ */
+const REFERENCE_PERCENTILE = 0.85;
 /** Constantes de tiempo del seguidor de envolvente: abre rápido y cierra más despacio. */
 const ATTACK_MS = 25;
 const RELEASE_MS = 90;
@@ -46,14 +50,19 @@ function toSteps(perTick: readonly MouthLevel[], tickMs: number): MouthStep[] {
   return steps;
 }
 
-/** RMS de cada ventana de `windowSize` muestras (la última puede ser más corta). */
+/**
+ * RMS de cada ventana de `windowSize` muestras (la última puede ser más corta). Una ventana con una
+ * muestra NaN o infinita vale 0 (silencio): si no, el seguidor de envolvente quedaría en NaN y la
+ * boca congelada hasta el final.
+ */
 function windowRms(samples: Float32Array, windowSize: number): number[] {
   const rms: number[] = [];
   for (let start = 0; start < samples.length; start += windowSize) {
     const end = Math.min(start + windowSize, samples.length);
     let sum = 0;
     for (let i = start; i < end; i++) sum += samples[i]! * samples[i]!;
-    rms.push(Math.sqrt(sum / (end - start)));
+    const value = Math.sqrt(sum / (end - start));
+    rms.push(Number.isFinite(value) ? value : 0);
   }
   return rms;
 }
@@ -61,8 +70,9 @@ function windowRms(samples: Float32Array, windowSize: number): number[] {
 /**
  * Convierte audio en pasos de boca con una apertura continua:
  *
- * 1. RMS por ventana de 20 ms; una ventana bajo el piso absoluto (0.005) es silencio.
- * 2. Se normaliza contra el percentil 95 de las ventanas con sonido (robusto a picos sueltos).
+ * 1. RMS por ventana de 20 ms; una ventana bajo el piso absoluto (0.005), o con una muestra NaN o
+ *    infinita, es silencio.
+ * 2. Se normaliza contra el percentil 85 de las ventanas con sonido (robusto a picos sueltos).
  * 3. Seguidor de envolvente: ataque de ~25 ms y liberación de ~90 ms.
  * 4. Curva suave (`x^1.2`) y cuantización a 5 niveles con histéresis (no cambia por diferencias mínimas).
  * 5. La boca se mueve de a un nivel por ventana (pasa por los intermedios) y, antes de cambiar de
