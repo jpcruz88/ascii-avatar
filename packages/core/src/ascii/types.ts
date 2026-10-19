@@ -29,8 +29,9 @@ export interface RawImage {
 /**
  * - `glyphs`: un carácter de la rampa por celda, elegido por luminosidad.
  * - `halfblock`: `▀` con el píxel de arriba como frente y el de abajo como fondo.
- * - `grabado`: blanco y negro, tinta oscura sobre papel claro; los píxeles oscuros llevan los
- *   caracteres más densos. Es el modo por defecto.
+ * - `grabado`: blanco y negro, tinta oscura sobre papel claro; cada carácter se elige por la forma
+ *   de la tinta de su celda (ver `GLYPH_MASKS`), y las zonas oscuras llevan los más densos. Es el
+ *   modo por defecto.
  */
 export type AsciiMode = 'grabado' | 'glyphs' | 'halfblock';
 

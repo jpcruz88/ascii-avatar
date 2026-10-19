@@ -3,16 +3,18 @@ export type { AsciiFrame, AsciiMode, Cell, RawImage, Rgb, ToneRange } from './as
 export { decodeImage } from './ascii/decode.js';
 export type { GrabadoTone } from './ascii/convert.js';
 export {
-  GRABADO_RAMP,
   INK,
   PAPER,
   TONE_GAIN,
   TONE_OFFSET,
+  INK_SCALE,
   VIGNETTE,
   imageToAscii,
   TONE_PERCENTILES,
   grabadoTone,
 } from './ascii/convert.js';
+export { GLYPH_COLS, GLYPH_MASKS, GLYPH_ROWS } from './ascii/glyphs.js';
+export type { GlyphMask } from './ascii/glyphs.js';
 export { frameDiff, frameToAnsi } from './ascii/ansi.js';
 export { cornerDrift } from './ascii/drift.js';
 export {

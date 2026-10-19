@@ -5,7 +5,7 @@ import {
   frameDiff,
   frameToAnsi,
   imageToAscii,
-  GRABADO_RAMP,
+  GLYPH_MASKS,
   INK,
   PAPER,
   grabadoTone,
@@ -165,16 +165,22 @@ describe('modo grabado', () => {
     return { width, height, data };
   }
 
-  it('la rampa tiene 70 caracteres, de claro a oscuro, y termina en $', () => {
-    expect(GRABADO_RAMP).toHaveLength(70);
-    expect(GRABADO_RAMP.startsWith(' .\'`^')).toBe(true);
-    expect(GRABADO_RAMP.endsWith('B@$')).toBe(true);
-  });
+  /** Tinta media de la máscara de un carácter (0..1) y su puesto de más claro (0) a más denso. */
+  const densidad = new Map(
+    GLYPH_MASKS.map(([c, m]) => {
+      const d = m.replace(/ /g, '');
+      return [c, [...d].reduce((s, x) => s + Number(x), 0) / (d.length * 9)] as const;
+    }),
+  );
+  const porDensidad = [...densidad.keys()].sort((a, b) => densidad.get(a)! - densidad.get(b)!);
+  const puesto = (ch: string): number => porDensidad.indexOf(ch);
+  const ULTIMO = porDensidad.length - 1;
 
-  it('negro puro da $ en tinta sobre papel en todas las celdas', () => {
+  it('negro puro da un carácter de los más densos, en tinta sobre papel, en todas las celdas', () => {
     const f = imageToAscii(solid(8, 8, 0), sinViñeta);
     expect(f.cells.length).toBe(f.cols * f.rows);
-    expect(f.cells.every((c) => c.ch === '$')).toBe(true);
+    expect(new Set(f.cells.map((c) => c.ch)).size).toBe(1);
+    expect(puesto(f.cells[0]!.ch)).toBeGreaterThanOrEqual(ULTIMO - 4);
     expect(f.cells.every((c) => c.fg.r === INK.r && c.fg.g === INK.g && c.fg.b === INK.b)).toBe(true);
     expect(f.cells.every((c) => c.bg !== null && c.bg.r === PAPER.r && c.bg.g === PAPER.g && c.bg.b === PAPER.b)).toBe(true);
     expect(INK).toEqual({ r: 20, g: 20, b: 20 });
@@ -186,23 +192,26 @@ describe('modo grabado', () => {
     expect(f.cells.every((c) => c.ch === ' ')).toBe(true);
   });
 
-  it('un degradado de negro a blanco va de denso a ralo, sin retroceder', () => {
+  it('un degradado de negro a blanco va de denso a ralo', () => {
     const f = imageToAscii(gradient(160, 16), { cols: 40, mode: 'grabado', vignette: false });
-    const row = f.cells.slice(0, f.cols).map((c) => GRABADO_RAMP.indexOf(c.ch));
-    expect(row.every((i) => i >= 0)).toBe(true);
-    for (let i = 1; i < row.length; i++) expect(row[i]!).toBeLessThanOrEqual(row[i - 1]!);
-    expect(row[0]).toBe(GRABADO_RAMP.length - 1);
-    expect(row.at(-1)).toBe(0);
+    const row = f.cells.slice(0, f.cols).map((c) => densidad.get(c.ch));
+    expect(row.every((d) => d !== undefined)).toBe(true);
+    const d = row as number[];
+    // La forma puede cambiar el carácter entre vecinos, pero la tinta no sube de una celda a la siguiente
+    // más que un poco, y de punta a punta baja del más denso al papel.
+    for (let i = 1; i < d.length; i++) expect(d[i]!).toBeLessThanOrEqual(d[i - 1]! + 0.03);
+    expect(puesto(f.cells[0]!.ch)).toBeGreaterThanOrEqual(ULTIMO - 4);
+    expect(f.cells[f.cols - 1]!.ch).toBe(' ');
   });
 
   it('una imagen de un solo tono no rompe el estiramiento', () => {
     const f = imageToAscii(solid(8, 8, 128), sinViñeta);
-    expect(f.cells.every((c) => GRABADO_RAMP.includes(c.ch))).toBe(true);
+    expect(f.cells.every((c) => densidad.has(c.ch))).toBe(true);
     expect(new Set(f.cells.map((c) => c.ch)).size).toBe(1);
   });
 
-  it('el viñeteado deja las esquinas en blanco papel y el centro no', () => {
-    const f = imageToAscii(solid(100, 100, 128), { cols: 20, mode: 'grabado' });
+  it('con viñeteado (opcional) las esquinas quedan en blanco papel y el centro no', () => {
+    const f = imageToAscii(solid(100, 100, 128), { cols: 20, mode: 'grabado', vignette: true });
     const at = (col: number, row: number) => f.cells[row * f.cols + col]!;
     for (const [c, r] of [[0, 0], [19, 0], [0, f.rows - 1], [19, f.rows - 1]] as const) {
       expect(at(c, r).ch).toBe(' ');
@@ -261,12 +270,11 @@ describe('modo grabado', () => {
       }
     }
     const f = imageToAscii(img, { cols: 20, mode: 'grabado', vignette: false });
-    const dense = GRABADO_RAMP.length - 10;
     const row = Math.floor(f.rows / 2);
-    const idx = (col: number): number => GRABADO_RAMP.indexOf(f.cells[row * f.cols + col]!.ch);
-    expect(idx(0)).toBeGreaterThanOrEqual(dense);
-    expect(idx(1)).toBeGreaterThanOrEqual(dense - 12);
-    expect(idx(f.cols - 1)).toBeLessThan(10);
+    const idx = (col: number): number => puesto(f.cells[row * f.cols + col]!.ch);
+    expect(idx(0)).toBeGreaterThanOrEqual(ULTIMO - 6);
+    expect(idx(1)).toBeGreaterThanOrEqual(ULTIMO - 12);
+    expect(idx(f.cols - 1)).toBeLessThan(8);
   });
 
   it('el estiramiento de percentiles ignora un grupo de píxeles extremos de menos de 1 %', () => {
@@ -283,7 +291,7 @@ describe('modo grabado', () => {
     }
     const f = imageToAscii(img, { cols: 40, mode: 'grabado', vignette: false });
     const row = Math.floor(f.rows / 2);
-    expect(GRABADO_RAMP.indexOf(f.cells[row * f.cols]!.ch)).toBeGreaterThanOrEqual(GRABADO_RAMP.length - 10);
+    expect(puesto(f.cells[row * f.cols]!.ch)).toBeGreaterThanOrEqual(ULTIMO - 6);
   });
 
   it('frameToAnsi emite tinta y papel una vez por tramo, no por celda', () => {
