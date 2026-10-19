@@ -67,6 +67,8 @@ export class AsciiAvatarElement extends Base {
   private loaded: Loaded | null = null;
   private ready: Promise<boolean>;
   private settle: (ok: boolean) => void = () => undefined;
+  /** `ready` ya se resolvió: la próxima carga necesita una promesa nueva. */
+  private settled = false;
   private generation = 0;
   private raf = 0;
   private nextAt = 0;
@@ -114,6 +116,7 @@ export class AsciiAvatarElement extends Base {
     this.resizeObserver = null;
     this.pause();
     this.loaded?.engine.stop();
+    this.audio?.close?.();
   }
 
   attributeChangedCallback(name: string, oldValue: string | null, value: string | null): void {
@@ -124,8 +127,9 @@ export class AsciiAvatarElement extends Base {
 
   /** Dice el resumen hablado de `texto`. Resuelve cuando termina (o cuando otra orden lo corta). */
   async decir(texto: string): Promise<void> {
-    // Sin esperar: el contexto de audio se desbloquea mejor dentro del gesto del usuario.
-    this.audio?.unlock();
+    // Sin esperar: el contexto de audio se desbloquea mejor dentro del gesto del usuario. Sin
+    // `tts-url` no hay nada que sonar y no se crea ningún contexto de audio.
+    if (this.tts() !== null) this.audio?.unlock();
     if (!(await this.ready) || this.loaded === null) throw new Error('El avatar no se pudo cargar.');
     return this.loaded.engine.say(String(texto ?? ''));
   }
@@ -153,7 +157,15 @@ export class AsciiAvatarElement extends Base {
   }
 
   private newReady(): Promise<boolean> {
+    this.settled = false;
     return new Promise<boolean>((resolve) => (this.settle = resolve));
+  }
+
+  /** Resuelve `ready` una sola vez por carga. */
+  private settleReady(ok: boolean): void {
+    if (this.settled) return;
+    this.settled = true;
+    this.settle(ok);
   }
 
   private tts() {
@@ -165,12 +177,18 @@ export class AsciiAvatarElement extends Base {
     const gen = ++this.generation;
     this.pause();
     this.loaded?.engine.stop();
-    if (this.loaded !== null) {
-      this.loaded = null;
-      this.ready = this.newReady();
-    }
+    this.loaded = null;
+    // Cada carga tiene su promesa: quien llamó a decir antes espera a esta carga, no a una vieja.
+    if (this.settled) this.ready = this.newReady();
     const src = this.getAttribute('src');
-    if (src === null || src.trim() === '') return;
+    if (src === null || src.trim() === '') {
+      // Sin paquete: nada que dibujar, y quien espere a decir recibe un error en vez de esperar siempre.
+      this.pre.textContent = '';
+      this.lastText = null;
+      this.figure.setAttribute('aria-label', 'Avatar');
+      this.settleReady(false);
+      return;
+    }
     const base = new URL(src.endsWith('/') ? src : `${src}/`, document.baseURI);
     try {
       const manifestRes = await fetch(new URL('manifest.json', base));
@@ -199,7 +217,7 @@ export class AsciiAvatarElement extends Base {
       this.lastText = null;
       this.draw();
       this.start();
-      this.settle(true);
+      this.settleReady(true);
       this.emit('listo', { agente: manifest.agent, cols: manifest.cols, rows: manifest.rows });
     } catch (error) {
       if (gen !== this.generation) return;
@@ -207,7 +225,7 @@ export class AsciiAvatarElement extends Base {
       const mensaje = `No se pudo cargar el avatar de ${base.href}: ${reason}`;
       this.pre.textContent = mensaje;
       this.pre.style.whiteSpace = 'normal';
-      this.settle(false);
+      this.settleReady(false);
       this.emit('aviso', { mensaje });
     }
   }

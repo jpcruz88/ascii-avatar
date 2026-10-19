@@ -146,6 +146,76 @@ describe('<ascii-avatar>', () => {
     expect(pre(el).textContent).toMatch(/no se pudo cargar/i);
   });
 
+  it('si la primera carga falla y luego src apunta a un paquete bueno, decir funciona', async () => {
+    const el = mount({ src: 'no-existe' });
+    await until(el, 'aviso');
+    el.setAttribute('src', 'muestra-web/');
+    await until(el, 'listo');
+    const hablando = until(el, 'hablando');
+    const p = el.decir('Hola');
+    await hablando;
+    await vi.advanceTimersByTimeAsync(2000);
+    await expect(p).resolves.toBeUndefined();
+  });
+
+  it('cambiar src a otro paquete recarga y decir sigue funcionando', async () => {
+    const el = mount();
+    await until(el, 'listo');
+    el.setAttribute('src', 'muestra-web/?v=2');
+    el.setAttribute('src', 'muestra-web');
+    await until(el, 'listo');
+    const p = el.decir('Hola');
+    await until(el, 'hablando');
+    await vi.advanceTimersByTimeAsync(2000);
+    await expect(p).resolves.toBeUndefined();
+  });
+
+  it('quitar src deja el avatar vacío y decir falla en vez de quedarse esperando', async () => {
+    const el = mount();
+    await until(el, 'listo');
+    el.removeAttribute('src');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(pre(el).textContent).toBe('');
+    await expect(el.decir('Hola')).rejects.toThrow(/no se pudo cargar|sin paquete/i);
+    el.setAttribute('src', 'muestra-web/');
+    await until(el, 'listo');
+    const p = el.decir('Hola');
+    await until(el, 'hablando');
+    await vi.advanceTimersByTimeAsync(2000);
+    await expect(p).resolves.toBeUndefined();
+  });
+
+  it('sin tts-url no crea un AudioContext; al quitarlo de la página cierra el que creó', async () => {
+    const created: { closed: boolean }[] = [];
+    class FakeCtx {
+      state = 'running';
+      closed = false;
+      baseLatency = 0;
+      constructor() {
+        created.push(this);
+      }
+      resume = async () => undefined;
+      close = async () => void (this.closed = true);
+    }
+    vi.stubGlobal('AudioContext', FakeCtx);
+    const sinVoz = mount();
+    await until(sinVoz, 'listo');
+    const fin = until(sinVoz, 'fin');
+    void sinVoz.decir('Hola');
+    await vi.advanceTimersByTimeAsync(2000);
+    await fin;
+    expect(created).toHaveLength(0);
+    sinVoz.remove();
+
+    const conVoz = mount({ src: 'muestra-web/', 'tts-url': 'http://127.0.0.1:8787/tts' });
+    await until(conVoz, 'listo');
+    void conVoz.decir('Hola').catch(() => undefined);
+    expect(created).toHaveLength(1);
+    conVoz.remove();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(created[0]!.closed).toBe(true);
+  });
+
   it('oculto no dibuja; al volver, se pone al día', async () => {
     const el = mount();
     await until(el, 'listo');

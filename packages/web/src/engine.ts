@@ -25,6 +25,8 @@ export interface AudioOut {
   /** Cuánto tarda en oírse lo que se manda a sonar, en ms. */
   latencyMs(): number;
   prepare(wav: ArrayBuffer): Promise<Prepared>;
+  /** Libera el contexto de audio (al quitar el elemento de la página). */
+  close?(): void;
 }
 
 export interface TtsRequest {
@@ -33,8 +35,11 @@ export interface TtsRequest {
   style?: string;
 }
 
-/** Pide la voz (un WAV) para un texto; lanza con un mensaje legible si no se pudo. */
-export type TtsFetch = (req: TtsRequest) => Promise<ArrayBuffer>;
+/**
+ * Pide la voz (un WAV) para un texto; lanza con un mensaje legible si no se pudo. `signal` se aborta
+ * si ya nadie la va a oír (otro `say` o `stop`): conviene cancelar la petición para no pagarla.
+ */
+export type TtsFetch = (req: TtsRequest, signal?: AbortSignal) => Promise<ArrayBuffer>;
 
 export type EngineEvent = 'hablando' | 'fin' | 'aviso';
 
@@ -81,6 +86,8 @@ interface Speech {
   announced: boolean;
   cancelEnd: () => void;
   prepared: Prepared | null;
+  /** Cancela la petición de voz en curso. */
+  abort: AbortController;
 }
 
 /**
@@ -136,9 +143,17 @@ export class AvatarEngine {
   say(text: string): Promise<void> {
     this.finish(this.current);
     return new Promise<void>((resolve) => {
-      const speech: Speech = { id: ++this.seq, resolve, announced: false, cancelEnd: () => undefined, prepared: null };
+      const speech: Speech = {
+        id: ++this.seq,
+        resolve,
+        announced: false,
+        cancelEnd: () => undefined,
+        prepared: null,
+        abort: new AbortController(),
+      };
       this.current = speech;
-      void this.run(speech, text);
+      // Pase lo que pase dentro, `say` siempre resuelve.
+      this.run(speech, text).catch(() => this.finish(speech));
     });
   }
 
@@ -153,7 +168,8 @@ export class AvatarEngine {
     this.animator.thinking(this.d.now());
     let data: ArrayBuffer;
     try {
-      data = await tts({ text: summary, voice: this.d.voice, ...(this.d.voiceStyle ? { style: this.d.voiceStyle } : {}) });
+      const req = { text: summary, voice: this.d.voice, ...(this.d.voiceStyle ? { style: this.d.voiceStyle } : {}) };
+      data = await tts(req, speech.abort.signal);
     } catch (error) {
       if (!this.live(speech)) return;
       const message = error instanceof Error && error.message !== '' ? error.message : NOTICE_TTS_FAILED;
@@ -214,6 +230,7 @@ export class AvatarEngine {
     if (speech === null || this.current !== speech) return;
     this.current = null;
     speech.cancelEnd();
+    speech.abort.abort();
     try {
       speech.prepared?.stop();
     } catch {

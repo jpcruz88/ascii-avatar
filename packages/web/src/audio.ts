@@ -18,6 +18,12 @@ export function createWebAudioOut(): AudioOut | null {
       const c = context();
       if (c.state === 'suspended') void c.resume().catch(() => undefined);
     },
+    close() {
+      // Libera el dispositivo de audio; un `unlock` posterior crea otro contexto.
+      const c = ctx;
+      ctx = null;
+      if (c !== null) void c.close().catch(() => undefined);
+    },
     latencyMs() {
       if (ctx === null) return 0;
       const out = (ctx as AudioContext & { outputLatency?: number }).outputLatency;
@@ -53,9 +59,13 @@ export function createWebAudioOut(): AudioOut | null {
  * mensaje del proxy (en `{error}`) se usa como aviso; nunca se envía ninguna llave desde aquí.
  */
 export function createProxyTts(url: string): TtsFetch {
-  return async (req) => {
+  return async (req, signal) => {
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), TTS_TIMEOUT_MS);
+    // Si quien la pidió ya no la quiere (otro decir, callar), se corta la petición.
+    const cancel = (): void => abort.abort();
+    if (signal?.aborted) abort.abort();
+    signal?.addEventListener('abort', cancel, { once: true });
     try {
       let res: Response;
       try {
@@ -81,6 +91,7 @@ export function createProxyTts(url: string): TtsFetch {
       return await res.arrayBuffer();
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener('abort', cancel);
     }
   };
 }

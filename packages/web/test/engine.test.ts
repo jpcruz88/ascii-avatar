@@ -298,6 +298,43 @@ describe('AvatarEngine con voz (proxy)', () => {
     expect(audio.stopped).toBe(1);
   });
 
+  it('un decir nuevo o callar cancelan la petición de voz en curso (no se paga lo que nadie oirá)', async () => {
+    const audio = new FakeAudio();
+    const signals: AbortSignal[] = [];
+    const { engine } = setup({
+      audio,
+      tts: (_req, signal) => {
+        signals.push(signal!);
+        return new Promise<ArrayBuffer>((_resolve, reject) =>
+          signal!.addEventListener('abort', () => reject(new DOMException('cancelada', 'AbortError'))),
+        );
+      },
+    });
+    const p1 = engine.say('Primera.');
+    await flush();
+    expect(signals[0]!.aborted).toBe(false);
+    const p2 = engine.say('Segunda.');
+    await flush();
+    expect(signals[0]!.aborted).toBe(true);
+    await p1;
+    engine.stop();
+    expect(signals[1]!.aborted).toBe(true);
+    await p2;
+    expect(audio.started).toEqual([]);
+  });
+
+  it('say siempre resuelve aunque algo falle por dentro', async () => {
+    const throwing: AudioOut = {
+      unlock: () => {
+        throw new Error('sin audio');
+      },
+      latencyMs: () => 0,
+      prepare: async () => ({ start: () => undefined, stop: () => undefined }),
+    };
+    const { engine } = setup({ audio: throwing, tts: async () => wav() });
+    await expect(engine.say('Hola.')).resolves.toBeUndefined();
+  });
+
   it('si llega otro decir mientras se espera la voz, la respuesta vieja no suena', async () => {
     const audio = new FakeAudio();
     let release: (b: ArrayBuffer) => void = () => undefined;
