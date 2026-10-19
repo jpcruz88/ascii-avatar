@@ -27,10 +27,50 @@ export const MOUTH_BLENDS = {
 
 export type BlendFrameId = keyof typeof MOUTH_BLENDS;
 
-/** Todo lo que el panel puede dibujar: las 8 caras y los cuadros intermedios de boca. */
-export type FrameId = FaceId | BlendFrameId;
+/** Cuadros que todo agente tiene: las 8 caras y los cuadros intermedios de boca. */
+export type BaseFrameId = FaceId | BlendFrameId;
 
-export const FRAME_IDS: readonly FrameId[] = [...FACE_IDS, ...(Object.keys(MOUTH_BLENDS) as BlendFrameId[])];
+export const FRAME_IDS: readonly BaseFrameId[] = [...FACE_IDS, ...(Object.keys(MOUTH_BLENDS) as BlendFrameId[])];
+
+/**
+ * Poses sueltas opcionales (`poses/<id>.png`, mismo lienzo que las caras): la cabeza inclinada,
+ * asintiendo, girada o mirando a un lado. Si faltan, el avatar simplemente no las usa.
+ */
+export const POSE_IDS = [
+  'tilt_left',
+  'tilt_right',
+  'nod_up',
+  'nod_down',
+  'turn_left',
+  'turn_right',
+  'look_left',
+  'look_right',
+] as const;
+
+export type PoseId = (typeof POSE_IDS)[number];
+
+/**
+ * Clips de movimiento opcionales (`clips/<clip>/000.png`, `001.png`…): secuencias suaves que
+ * empiezan y terminan en la cara neutral y se reproducen a unos 24 cuadros por segundo.
+ */
+export const CLIP_IDS = ['nod', 'tilt_left', 'tilt_right', 'turn_left', 'turn_right', 'think'] as const;
+
+export type ClipId = (typeof CLIP_IDS)[number];
+
+export type PoseFrameId = `pose:${PoseId}`;
+export type ClipFrameId = `clip:${ClipId}:${number}`;
+
+export const poseFrameId = (id: PoseId): PoseFrameId => `pose:${id}`;
+export const clipFrameId = (clip: ClipId, index: number): ClipFrameId => `clip:${clip}:${index}`;
+
+/** Todo lo que el panel puede dibujar: los cuadros de base y, si el agente los tiene, poses y clips. */
+export type FrameId = BaseFrameId | PoseFrameId | ClipFrameId;
+
+/** Poses y clips (con su número de cuadros) que tiene un agente. */
+export interface Motion {
+  poses: PoseId[];
+  clips: Partial<Record<ClipId, number>>;
+}
 
 /** Cuadro de cada nivel de apertura de la boca, de 0 (cerrada) a 4 (abierta). */
 export const MOUTH_FRAMES = ['neutral', 'mouth_q1', 'mouth_mid', 'mouth_q3', 'mouth_open'] as const satisfies readonly FrameId[];

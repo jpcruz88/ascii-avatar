@@ -112,7 +112,7 @@ export async function runPanel(opts: PanelOptions): Promise<number> {
     await runTty({
       agent: name,
       paper: mode === 'grabado',
-      getFrame: () => atlas[animator.frame(now())],
+      getFrame: () => atlas[animator.frame(now())] ?? atlas.neutral,
       speaking: () => animator.speaking(now()),
       voiceOn: () => controller.voiceOn(),
       spentToday: () => controller.spentToday(),

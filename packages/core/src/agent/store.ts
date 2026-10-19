@@ -1,11 +1,29 @@
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { decodeImage } from '../ascii/decode.js';
-import { grabadoTone, imageToAscii } from '../ascii/convert.js';
+import { grabadoTone, imageToAscii, type GrabadoTone } from '../ascii/convert.js';
 import type { AsciiFrame, AsciiMode, RawImage } from '../ascii/types.js';
 import { blendImages } from '../ascii/blend.js';
-import { FACE_IDS, MOUTH_BLENDS, type BlendFrameId, type FaceId, type FrameId } from '../faces.js';
+import {
+  CLIP_IDS,
+  FACE_IDS,
+  MOUTH_BLENDS,
+  POSE_IDS,
+  clipFrameId,
+  poseFrameId,
+  type BaseFrameId,
+  type BlendFrameId,
+  type ClipFrameId,
+  type ClipId,
+  type FaceId,
+  type Motion,
+  type PoseFrameId,
+  type PoseId,
+} from '../faces.js';
+import { readAtlasCache, writeAtlasCache, type AtlasCache } from './atlas-cache.js';
 import { writeFileAtomic } from './atomic.js';
+import { CLIPS_DIR, POSES_DIR, clipFrameFile, clipsIn, posesIn, replaceDir } from './motion.js';
 
 /** Datos del agente que se guardan en `agent.json`. */
 export interface AgentConfig {
@@ -220,36 +238,216 @@ export function missingFaces(root: string, name: string): FaceId[] {
   return FACE_IDS.filter((id) => !existsSync(join(dir, 'faces', `${id}.png`)));
 }
 
+function isPng(buf: Buffer): boolean {
+  return buf.length >= PNG_SIGNATURE.length && buf.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE);
+}
+
+/** Poses que tiene el agente (`poses/<id>.png`), en el orden de `POSE_IDS`. */
+export function listPoses(root: string, name: string): PoseId[] {
+  return posesIn(agentDir(root, name));
+}
+
+/** Clips del agente con su número de cuadros; un clip con huecos en la numeración no cuenta. */
+export function listClips(root: string, name: string): Partial<Record<ClipId, number>> {
+  return clipsIn(agentDir(root, name));
+}
+
+/**
+ * Reemplaza el juego entero de poses del agente por `poses`. Todo o nada: si algún id es desconocido
+ * o algún archivo no es un PNG real, lanza sin escribir nada.
+ */
+export function savePoses(root: string, name: string, poses: Partial<Record<PoseId, Buffer>>): void {
+  const dir = agentDir(root, name);
+  const files = new Map<string, Buffer>();
+  for (const [id, png] of Object.entries(poses) as [string, Buffer][]) {
+    if (!(POSE_IDS as readonly string[]).includes(id)) throw new Error(`Pose desconocida: ${JSON.stringify(id)}.`);
+    if (!isPng(png)) throw new InvalidFaceImageError(`pose ${id}`);
+    files.set(`${id}.png`, png);
+  }
+  replaceDir(dir, POSES_DIR, files);
+}
+
+/**
+ * Reemplaza el juego entero de clips del agente: cada clip queda como `clips/<clip>/000.png`,
+ * `001.png`… Todo o nada, como `savePoses`.
+ */
+export function saveClips(root: string, name: string, clips: Partial<Record<ClipId, readonly Buffer[]>>): void {
+  const dir = agentDir(root, name);
+  const files = new Map<string, Buffer>();
+  for (const [clip, frames] of Object.entries(clips) as [string, readonly Buffer[]][]) {
+    if (!(CLIP_IDS as readonly string[]).includes(clip)) throw new Error(`Clip desconocido: ${JSON.stringify(clip)}.`);
+    if (frames.length === 0) throw new Error(`El clip ${clip} no tiene cuadros.`);
+    frames.forEach((png, i) => {
+      if (!isPng(png)) throw new InvalidFaceImageError(`clip ${clip}/${clipFrameFile(i)}`);
+      files.set(join(clip, clipFrameFile(i)), png);
+    });
+  }
+  replaceDir(dir, CLIPS_DIR, files);
+}
+
+/** Cuadros ASCII de un agente: los de base siempre y, si los tiene, `pose:<id>` y `clip:<clip>:<n>`. */
+export type Atlas = Record<BaseFrameId, AsciiFrame> & Partial<Record<PoseFrameId | ClipFrameId, AsciiFrame>>;
+
+/** Qué poses y clips (con cuántos cuadros) trae un atlas: lo que el animador puede usar. */
+export function atlasMotion(atlas: Atlas): Motion {
+  const keys = new Set(Object.keys(atlas));
+  const poses = POSE_IDS.filter((id) => keys.has(poseFrameId(id)));
+  const clips: Partial<Record<ClipId, number>> = {};
+  for (const clip of CLIP_IDS) {
+    let n = 0;
+    while (keys.has(clipFrameId(clip, n))) n++;
+    if (n > 0) clips[clip] = n;
+  }
+  return { poses, clips };
+}
+
+/** Sube si cambia cómo se convierten los cuadros, para no reutilizar una caché vieja. */
+const CACHE_VERSION = 1;
+/** Cuántas imágenes se decodifican a la vez (sharp usa hilos aparte). */
+const DECODE_BATCH = 4;
+
+const sha = (text: string): string => createHash('sha1').update(text).digest('hex').slice(0, 20);
+
+/** Fecha de modificación y tamaño del archivo: si no cambian, su cuadro guardado sigue valiendo. */
+function fileSig(path: string): string {
+  const { mtimeMs, size } = statSync(path);
+  return `${mtimeMs}:${size}`;
+}
+
+/** Ancho y alto de un PNG leídos de su cabecera IHDR, sin decodificarlo. */
+function pngSize(buf: Buffer): { width: number; height: number } | undefined {
+  if (!isPng(buf) || buf.length < 24) return undefined;
+  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+}
+
+interface Job {
+  id: string;
+  /** Archivos de los que sale el cuadro (entran en la clave de la caché). */
+  files: string[];
+  /** Imagen a convertir; `undefined` si el archivo no sirve (dañado o de otro tamaño). */
+  image: () => Promise<RawImage | undefined>;
+}
+
 /**
  * Lee las 8 caras y las convierte a cuadros ASCII. Falla si falta alguna. Además sintetiza los
- * cuadros intermedios de boca (`MOUTH_BLENDS`) mezclando píxel a píxel sus dos caras vecinas y los
- * convierte igual que al resto. En modo `grabado` el estiramiento de contraste usa un solo rango
- * calculado sobre las 8 caras, para que al alternar entre cuadros el tono no parpadee.
+ * cuadros intermedios de boca (`MOUTH_BLENDS`) mezclando píxel a píxel sus dos caras vecinas, y
+ * convierte las poses y los cuadros de clips que el agente tenga (los que no se pueden leer o no
+ * miden lo mismo que las caras se descartan; un clip con un cuadro malo se descarta entero). En
+ * modo `grabado` el estiramiento de contraste usa un solo rango calculado sobre las 8 caras, y ese
+ * mismo rango vale para poses y clips, para que al alternar entre cuadros el tono no parpadee.
+ *
+ * Los cuadros convertidos se guardan en `.cache/` del agente (escritura atómica), con una clave por
+ * cuadro hecha de la fecha y el tamaño de sus archivos, las columnas, el modo y el tono. Con
+ * `cache: false` no se lee ni se escribe la caché.
  */
 export async function loadAtlas(
   root: string,
   name: string,
-  opts: { cols: number; mode: AsciiMode },
-): Promise<Record<FrameId, AsciiFrame>> {
+  opts: { cols: number; mode: AsciiMode; cache?: boolean },
+): Promise<Atlas> {
   const missing = missingFaces(root, name);
   if (missing.length > 0) {
     throw new Error(`Faltan caras del agente "${name}": ${missing.join(', ')}.`);
   }
+  const { cols, mode } = opts;
+  const useCache = opts.cache !== false;
   const dir = agentDir(root, name);
-  const images = {} as Record<FaceId, RawImage>;
-  for (const id of FACE_IDS) {
-    images[id] = await decodeImage(readFileSync(join(dir, 'faces', `${id}.png`)));
+  const facePath = (id: FaceId): string => join(dir, 'faces', `${id}.png`);
+  const faceImages = new Map<FaceId, Promise<RawImage>>();
+  const face = (id: FaceId): Promise<RawImage> => {
+    let img = faceImages.get(id);
+    if (img === undefined) faceImages.set(id, (img = decodeImage(readFileSync(facePath(id)))));
+    return img;
+  };
+
+  const cacheFile = join(dir, '.cache', `atlas-${mode}-${cols}.bin`);
+  const cache: AtlasCache | undefined = useCache ? readAtlasCache(cacheFile) : undefined;
+  const facesSig = FACE_IDS.map((id) => fileSig(facePath(id))).join('|');
+  let tone: GrabadoTone | null = null;
+  if (mode === 'grabado') {
+    tone =
+      cache !== undefined && cache.meta.facesSig === facesSig && cache.meta.tone !== null
+        ? cache.meta.tone
+        : grabadoTone(await Promise.all(FACE_IDS.map(face)), cols);
   }
-  const tone =
-    opts.mode === 'grabado'
-      ? grabadoTone(FACE_IDS.map((id) => images[id]), opts.cols)
-      : undefined;
+  const toneHash = sha(JSON.stringify(tone));
   const convert = (img: RawImage): AsciiFrame =>
-    imageToAscii(img, { ...opts, ...(tone === undefined ? {} : { tone }) });
-  const atlas = {} as Record<FrameId, AsciiFrame>;
-  for (const id of FACE_IDS) atlas[id] = convert(images[id]);
+    imageToAscii(img, { cols, mode, ...(tone === null ? {} : { tone }) });
+
+  const reference = pngSize(readFileSync(facePath('neutral')));
+  /** Decodifica un archivo opcional; `undefined` si está dañado o no mide lo mismo que las caras. */
+  const optional = async (path: string): Promise<RawImage | undefined> => {
+    try {
+      const img = await decodeImage(readFileSync(path));
+      if (reference !== undefined && (img.width !== reference.width || img.height !== reference.height)) return undefined;
+      return img;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const jobs: Job[] = [];
+  for (const id of FACE_IDS) jobs.push({ id, files: [facePath(id)], image: () => face(id) });
   for (const [id, [a, b]] of Object.entries(MOUTH_BLENDS) as [BlendFrameId, readonly [FaceId, FaceId]][]) {
-    atlas[id] = convert(blendImages(images[a], images[b], 0.5));
+    jobs.push({ id, files: [facePath(a), facePath(b)], image: async () => blendImages(await face(a), await face(b), 0.5) });
   }
-  return atlas;
+  for (const pose of posesIn(dir)) {
+    const path = join(dir, POSES_DIR, `${pose}.png`);
+    jobs.push({ id: poseFrameId(pose), files: [path], image: () => optional(path) });
+  }
+  const clips = clipsIn(dir);
+  for (const clip of CLIP_IDS) {
+    for (let i = 0; i < (clips[clip] ?? 0); i++) {
+      const path = join(dir, CLIPS_DIR, clip, clipFrameFile(i));
+      jobs.push({ id: clipFrameId(clip, i), files: [path], image: () => optional(path) });
+    }
+  }
+
+  const frames = new Map<string, { key: string; frame: AsciiFrame }>();
+  const pending: { job: Job; key: string }[] = [];
+  let dirty = cache === undefined || cache.meta.facesSig !== facesSig;
+  for (const job of jobs) {
+    let key: string;
+    try {
+      key = sha([CACHE_VERSION, cols, mode, toneHash, ...job.files.map(fileSig)].join('|'));
+    } catch {
+      continue; // El archivo desapareció entre listar y leer: ese cuadro no se usa.
+    }
+    const hit = cache?.get(job.id, key);
+    if (hit !== undefined) frames.set(job.id, { key, frame: hit });
+    else pending.push({ job, key });
+  }
+  for (let i = 0; i < pending.length; i += DECODE_BATCH) {
+    const batch = pending.slice(i, i + DECODE_BATCH);
+    const images = await Promise.all(batch.map(({ job }) => job.image()));
+    batch.forEach(({ job, key }, j) => {
+      const img = images[j];
+      if (img === undefined) return;
+      frames.set(job.id, { key, frame: convert(img) });
+      dirty = true;
+    });
+  }
+  if (cache !== undefined && !dirty) {
+    // Un cuadro que ya no existe (pose o clip quitado) también obliga a reescribir.
+    dirty = cache.size !== frames.size;
+  }
+
+  const atlas: Record<string, AsciiFrame> = {};
+  for (const job of jobs) {
+    const entry = frames.get(job.id);
+    if (entry !== undefined) atlas[job.id] = entry.frame;
+  }
+  // Un clip con algún cuadro malo se descarta entero: se reproduciría a saltos.
+  for (const clip of CLIP_IDS) {
+    const ids = Array.from({ length: clips[clip] ?? 0 }, (_, i) => clipFrameId(clip, i));
+    if (!ids.every((id) => id in atlas)) for (const id of ids) delete atlas[id];
+  }
+  if (useCache && dirty) {
+    try {
+      writeAtlasCache(cacheFile, { facesSig, tone }, [...frames].map(([id, { key, frame }]) => ({ id, key, frame })));
+    } catch {
+      // Sin caché el panel funciona igual, solo abre más despacio.
+    }
+  }
+  return atlas as Atlas;
 }

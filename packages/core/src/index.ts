@@ -26,15 +26,20 @@ export {
   InvalidPhotoError,
   InvalidVoiceError,
   MAX_VOICE_STYLE_LENGTH,
+  atlasMotion,
   createAgent,
+  listClips,
+  listPoses,
   loadAgent,
   loadAtlas,
   missingFaces,
+  saveClips,
   saveFace,
+  savePoses,
   updateAgentVoice,
   validateAgentName,
 } from './agent/store.js';
-export type { AgentConfig, CreateAgentOptions } from './agent/store.js';
+export type { AgentConfig, Atlas, CreateAgentOptions } from './agent/store.js';
 export { loadApiKey, saveApiKey } from './agent/secrets.js';
 export {
   BudgetExceededError,
