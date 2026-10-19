@@ -5,6 +5,10 @@ import {
   frameDiff,
   frameToAnsi,
   imageToAscii,
+  GRABADO_RAMP,
+  INK,
+  PAPER,
+  toneRange,
   type AsciiFrame,
   type RawImage,
 } from '../src/index.js';
@@ -139,5 +143,105 @@ describe('decodeImage', () => {
     expect(img.height).toBe(2);
     expect(img.data.length).toBe(16);
     expect(Array.from(img.data.slice(0, 4))).toEqual([10, 20, 30, 255]);
+  });
+});
+
+describe('modo grabado', () => {
+  const sinViñeta = { cols: 8, mode: 'grabado' as const, vignette: false };
+
+  /** Degradado horizontal de negro a blanco. */
+  function gradient(width: number, height: number): RawImage {
+    const data = new Uint8Array(width * height * 4);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = (y * width + x) * 4;
+        const v = Math.round((x / (width - 1)) * 255);
+        data[i] = v;
+        data[i + 1] = v;
+        data[i + 2] = v;
+        data[i + 3] = 255;
+      }
+    }
+    return { width, height, data };
+  }
+
+  it('la rampa tiene 70 caracteres, de claro a oscuro, y termina en $', () => {
+    expect(GRABADO_RAMP).toHaveLength(70);
+    expect(GRABADO_RAMP.startsWith(' .\'`^')).toBe(true);
+    expect(GRABADO_RAMP.endsWith('B@$')).toBe(true);
+  });
+
+  it('negro puro da $ en tinta sobre papel en todas las celdas', () => {
+    const f = imageToAscii(solid(8, 8, 0), sinViñeta);
+    expect(f.cells.length).toBe(f.cols * f.rows);
+    expect(f.cells.every((c) => c.ch === '$')).toBe(true);
+    expect(f.cells.every((c) => c.fg.r === INK.r && c.fg.g === INK.g && c.fg.b === INK.b)).toBe(true);
+    expect(f.cells.every((c) => c.bg !== null && c.bg.r === PAPER.r && c.bg.g === PAPER.g && c.bg.b === PAPER.b)).toBe(true);
+    expect(INK).toEqual({ r: 20, g: 20, b: 20 });
+    expect(PAPER).toEqual({ r: 250, g: 250, b: 247 });
+  });
+
+  it('blanco puro da espacio', () => {
+    const f = imageToAscii(solid(8, 8, 255), sinViñeta);
+    expect(f.cells.every((c) => c.ch === ' ')).toBe(true);
+  });
+
+  it('un degradado de negro a blanco va de denso a ralo, sin retroceder', () => {
+    const f = imageToAscii(gradient(160, 16), { cols: 40, mode: 'grabado', vignette: false });
+    const row = f.cells.slice(0, f.cols).map((c) => GRABADO_RAMP.indexOf(c.ch));
+    expect(row.every((i) => i >= 0)).toBe(true);
+    for (let i = 1; i < row.length; i++) expect(row[i]!).toBeLessThanOrEqual(row[i - 1]!);
+    expect(row[0]).toBe(GRABADO_RAMP.length - 1);
+    expect(row.at(-1)).toBe(0);
+  });
+
+  it('una imagen de un solo tono no rompe el estiramiento', () => {
+    const f = imageToAscii(solid(8, 8, 128), sinViñeta);
+    expect(f.cells.every((c) => GRABADO_RAMP.includes(c.ch))).toBe(true);
+    expect(new Set(f.cells.map((c) => c.ch)).size).toBe(1);
+  });
+
+  it('el viñeteado deja las esquinas en blanco papel y el centro no', () => {
+    const f = imageToAscii(solid(100, 100, 128), { cols: 20, mode: 'grabado' });
+    const at = (col: number, row: number) => f.cells[row * f.cols + col]!;
+    for (const [c, r] of [[0, 0], [19, 0], [0, f.rows - 1], [19, f.rows - 1]] as const) {
+      expect(at(c, r).ch).toBe(' ');
+    }
+    expect(at(10, Math.floor(f.rows * 0.38)).ch).not.toBe(' ');
+  });
+
+  it('es determinista', () => {
+    const img = gradient(64, 64);
+    expect(imageToAscii(img, { cols: 16, mode: 'grabado' })).toEqual(
+      imageToAscii(img, { cols: 16, mode: 'grabado' }),
+    );
+  });
+
+  it('toneRange da el mínimo y el máximo de luminosidad en 0..1', () => {
+    const t = toneRange(gradient(32, 4));
+    expect(t.min).toBe(0);
+    expect(t.max).toBe(1);
+    expect(toneRange(solid(4, 4, 51))).toEqual({ min: 0.2, max: 0.2 });
+  });
+
+  it('un rango de tono compartido pesa igual en dos imágenes distintas', () => {
+    const a = solid(8, 8, 100);
+    const b = solid(8, 8, 100);
+    // Sin rango compartido, cada una estiraría distinto; con él, el mismo gris da el mismo carácter.
+    const t = { min: 0, max: 1 };
+    const fa = imageToAscii(a, { ...sinViñeta, tone: t });
+    const fb = imageToAscii(b, { ...sinViñeta, tone: t });
+    expect(fa.cells[0]?.ch).toBe(fb.cells[0]?.ch);
+    const estirado = imageToAscii(a, { ...sinViñeta, tone: { min: 100 / 255, max: 1 } });
+    expect(estirado.cells[0]?.ch).not.toBe(fa.cells[0]?.ch);
+  });
+
+  it('frameToAnsi emite tinta y papel una vez por tramo, no por celda', () => {
+    const f = imageToAscii(gradient(64, 8), { cols: 16, mode: 'grabado', vignette: false });
+    const ansi = frameToAnsi(f);
+    const first = ansi.split('\n')[0]!;
+    expect(first.split('\x1b[38;2;20;20;20m')).toHaveLength(2);
+    expect(first.split('\x1b[48;2;250;250;247m')).toHaveLength(2);
+    expect(first.startsWith('\x1b[38;2;20;20;20m\x1b[48;2;250;250;247m')).toBe(true);
   });
 });

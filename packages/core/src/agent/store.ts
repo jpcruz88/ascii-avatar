@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { decodeImage } from '../ascii/decode.js';
-import { imageToAscii } from '../ascii/convert.js';
-import type { AsciiFrame, AsciiMode } from '../ascii/types.js';
+import { imageToAscii, mergeToneRanges, toneRange } from '../ascii/convert.js';
+import type { AsciiFrame, AsciiMode, RawImage } from '../ascii/types.js';
 import { FACE_IDS, type FaceId } from '../faces.js';
 import { writeFileAtomic } from './atomic.js';
 
@@ -173,7 +173,11 @@ export function missingFaces(root: string, name: string): FaceId[] {
   return FACE_IDS.filter((id) => !existsSync(join(dir, 'faces', `${id}.png`)));
 }
 
-/** Lee las 8 caras y las convierte a cuadros ASCII. Falla si falta alguna. */
+/**
+ * Lee las 8 caras y las convierte a cuadros ASCII. Falla si falta alguna. En modo `grabado` el
+ * estiramiento de contraste usa un solo rango calculado sobre las 8 caras, para que al alternar
+ * entre ellas el tono no parpadee.
+ */
 export async function loadAtlas(
   root: string,
   name: string,
@@ -184,10 +188,17 @@ export async function loadAtlas(
     throw new Error(`Faltan caras del agente "${name}": ${missing.join(', ')}.`);
   }
   const dir = agentDir(root, name);
+  const images = {} as Record<FaceId, RawImage>;
+  for (const id of FACE_IDS) {
+    images[id] = await decodeImage(readFileSync(join(dir, 'faces', `${id}.png`)));
+  }
+  const tone =
+    opts.mode === 'grabado'
+      ? mergeToneRanges(FACE_IDS.map((id) => toneRange(images[id])))
+      : undefined;
   const atlas = {} as Record<FaceId, AsciiFrame>;
   for (const id of FACE_IDS) {
-    const img = await decodeImage(readFileSync(join(dir, 'faces', `${id}.png`)));
-    atlas[id] = imageToAscii(img, opts);
+    atlas[id] = imageToAscii(images[id], { ...opts, ...(tone === undefined ? {} : { tone }) });
   }
   return atlas;
 }

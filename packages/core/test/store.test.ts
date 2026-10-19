@@ -293,3 +293,24 @@ describe('loadAgent con agent.json dañado', () => {
     expect(loadAgent(root, 'luna')).toEqual(good);
   });
 });
+
+describe('loadAtlas en modo grabado', () => {
+  /** 100x100 con un cuadrado central gris 100 sobre un fondo `bg`. */
+  function conCuadro(bg: number): Promise<Buffer> {
+    const data = Buffer.alloc(100 * 100 * 3, bg);
+    for (let y = 20; y < 60; y++) {
+      for (let x = 30; x < 70; x++) data.fill(100, (y * 100 + x) * 3, (y * 100 + x) * 3 + 3);
+    }
+    return sharp(data, { raw: { width: 100, height: 100, channels: 3 } }).png().toBuffer();
+  }
+
+  it('usa un solo rango de tono para las 8 caras: el mismo gris da el mismo carácter', async () => {
+    createAgent(root, 'luna', await png4x4(10));
+    for (const id of FACE_IDS) saveFace(root, 'luna', id, await conCuadro(id === 'neutral' ? 0 : 255));
+    const atlas = await loadAtlas(root, 'luna', { cols: 10, mode: 'grabado' });
+    // Fila 1, columna 4: dentro del cuadrado y lejos del borde (el viñeteado casi no lo toca).
+    const cell = (id: FaceId): string => atlas[id].cells[1 * 10 + 4]!.ch;
+    expect(cell('neutral')).toBe(cell('smile'));
+    expect(cell('neutral')).not.toBe(' ');
+  });
+});
