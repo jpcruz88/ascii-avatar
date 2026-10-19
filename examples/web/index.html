@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ascii-avatar en una página</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        --tinta: #141414;
+        --papel: #fafaf7;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--papel);
+        color: var(--tinta);
+        font: 16px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+      }
+      main {
+        max-width: 38rem;
+        margin: 0 auto;
+        padding: 24px 16px 48px;
+      }
+      h1 {
+        font-size: 1.4rem;
+        margin: 0 0 4px;
+      }
+      p {
+        margin: 0 0 16px;
+      }
+      ascii-avatar {
+        width: 100%;
+        max-width: 30rem;
+        margin: 0 auto 16px;
+        border: 1px solid var(--tinta);
+      }
+      form {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: end;
+      }
+      .campo {
+        flex: 1 1 16rem;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      input,
+      button {
+        font: inherit;
+        color: var(--tinta);
+        border: 1px solid var(--tinta);
+        border-radius: 4px;
+        padding: 8px 12px;
+        min-height: 44px;
+      }
+      input {
+        background: #fff;
+      }
+      button {
+        background: var(--papel);
+        cursor: pointer;
+      }
+      button[type='submit'] {
+        background: var(--tinta);
+        color: var(--papel);
+      }
+      button:focus-visible,
+      input:focus-visible {
+        outline: 3px solid #6b6b6b;
+        outline-offset: 2px;
+      }
+      .acciones {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      #estado {
+        margin-top: 16px;
+        min-height: 1.5em;
+        font-size: 0.95rem;
+      }
+      details {
+        margin-top: 24px;
+        font-size: 0.9rem;
+      }
+      code {
+        font-size: 0.9em;
+      }
+    </style>
+    <script type="module" src="../../packages/web/dist/ascii-avatar.js"></script>
+  </head>
+  <body>
+    <main>
+      <h1>ascii-avatar en una página</h1>
+      <p>Un avatar exportado con <code>avatar exportar-web</code>, dibujado con caracteres. Escribe algo y pulsa «Decir».</p>
+
+      <ascii-avatar id="avatar"></ascii-avatar>
+
+      <form id="form-decir">
+        <div class="campo">
+          <label for="texto">Texto</label>
+          <input id="texto" name="texto" value="Hola, soy un avatar hecho de caracteres. ¿Qué tal se ve?" autocomplete="off" />
+        </div>
+        <button type="submit">Decir</button>
+      </form>
+      <div class="acciones">
+        <button type="button" id="pensar">Pensar</button>
+        <button type="button" id="callar">Callar</button>
+      </div>
+      <p id="estado" role="status">Cargando…</p>
+
+      <details>
+        <summary>Configuración</summary>
+        <p>
+          Por defecto carga la muestra sintética (<code>muestra-web/</code>). Para otro agente exportado, pasa su carpeta en
+          <code>?agente=</code>, por ejemplo <code>?agente=../../preciado-web/</code>. Para que hable con voz, levanta el proxy
+          (<code>tools/web-tts-proxy</code>) y pasa su dirección en <code>?tts=http://localhost:8787/tts</code>.
+        </p>
+      </details>
+    </main>
+
+    <script type="module">
+      const params = new URLSearchParams(location.search);
+      const avatar = document.getElementById('avatar');
+      const estado = document.getElementById('estado');
+      const texto = document.getElementById('texto');
+
+      avatar.addEventListener('listo', (e) => (estado.textContent = `Listo: ${e.detail.agente}.`));
+      avatar.addEventListener('hablando', (e) => (estado.textContent = e.detail.voz ? 'Hablando…' : 'Hablando (sin voz)…'));
+      avatar.addEventListener('fin', () => (estado.textContent = 'Terminó.'));
+      avatar.addEventListener('aviso', (e) => (estado.textContent = e.detail.mensaje));
+
+      if (params.get('tts')) avatar.setAttribute('tts-url', params.get('tts'));
+      avatar.setAttribute('src', params.get('agente') || 'muestra-web/');
+
+      document.getElementById('form-decir').addEventListener('submit', (e) => {
+        e.preventDefault();
+        avatar.decir(texto.value).catch((err) => (estado.textContent = err.message));
+      });
+      document.getElementById('pensar').addEventListener('click', () => {
+        avatar.pensar();
+        estado.textContent = 'Pensando…';
+      });
+      document.getElementById('callar').addEventListener('click', () => avatar.callar());
+    </script>
+  </body>
+</html>

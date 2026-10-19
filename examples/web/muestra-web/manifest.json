@@ -1,0 +1,53 @@
+{
+  "format": "ascii-avatar-web",
+  "version": 1,
+  "agent": "muestra",
+  "voice": "Kore",
+  "voiceStyle": "amable y tranquila",
+  "cols": 72,
+  "rows": 45,
+  "ink": "#141414",
+  "paper": "#fafaf7",
+  "clipFps": 24,
+  "frameFile": "frames.txt",
+  "frames": [
+    "neutral",
+    "mouth_mid",
+    "mouth_open",
+    "blink",
+    "smile",
+    "serious",
+    "surprised",
+    "sad",
+    "mouth_q1",
+    "mouth_q3",
+    "pose:look_left",
+    "ease:look_left",
+    "pose:look_right",
+    "ease:look_right",
+    "clip:nod:0",
+    "clip:nod:1",
+    "clip:nod:2",
+    "clip:nod:3",
+    "clip:nod:4",
+    "clip:nod:5",
+    "clip:nod:6",
+    "clip:nod:7",
+    "clip:tilt_left:0",
+    "clip:tilt_left:1",
+    "clip:tilt_left:2",
+    "clip:tilt_left:3",
+    "clip:tilt_left:4",
+    "clip:tilt_left:5",
+    "clip:tilt_left:6",
+    "clip:tilt_left:7"
+  ],
+  "poses": [
+    "look_left",
+    "look_right"
+  ],
+  "clips": {
+    "nod": 8,
+    "tilt_left": 8
+  }
+}

@@ -5,3 +5,12 @@ dist/
 *.log
 spike-out/
 .claude/
+
+# Paquetes exportados con `avatar exportar-web` (pueden llevar la cara de una persona real)
+*-web/
+!examples/web/muestra-web/
+
+# Resultados de Playwright
+test-results/
+playwright-report/
+.playwright-cli/
