@@ -36,16 +36,51 @@ const isObject = (v: unknown): v is Json => typeof v === 'object' && v !== null 
 
 const quote = (s: string): string => `"${s.replace(/[\\"$`]/g, '\\$&')}"`;
 
+/** Enlaces estables a Node (Homebrew en Apple Silicon e Intel) que sobreviven a `brew upgrade`. */
+const STABLE_NODE_CANDIDATES: readonly string[] = ['/opt/homebrew/bin/node', '/usr/local/bin/node'];
+
+/**
+ * En Homebrew `process.execPath` es una ruta versionada del Cellar (`/opt/homebrew/Cellar/node/26.12.0/bin/node`)
+ * que deja de existir con `brew upgrade`. Si cuelga de un directorio `Cellar` y un enlace estable
+ * resuelve (`realpathSync`) al mismo binario, se usa el enlace; si no, queda `execPath`. El resolvedor
+ * es inyectable para probar sin depender de la máquina.
+ */
+export function stableNodePath(
+  execPath: string = process.execPath,
+  candidates: readonly string[] = STABLE_NODE_CANDIDATES,
+  resolve: (path: string) => string = realpathSync,
+): string {
+  if (!execPath.split(/[\\/]/).includes('Cellar')) return execPath;
+  let real: string;
+  try {
+    real = resolve(execPath);
+  } catch {
+    return execPath;
+  }
+  for (const candidate of candidates) {
+    try {
+      if (resolve(candidate) === real) return candidate;
+    } catch {
+      // el candidato no existe: se prueba el siguiente
+    }
+  }
+  return execPath;
+}
+
 /**
  * Comando con rutas absolutas (Node y `dist/bin.js`) para que el hook funcione aunque `avatar`
  * no esté en el PATH del entorno donde Claude Code lo ejecuta.
  */
-export function defaultHookCommand(): string {
+export function defaultHookCommand(
+  execPath: string = process.execPath,
+  candidates?: readonly string[],
+  resolve?: (path: string) => string,
+): string {
   let bin = fileURLToPath(new URL('../bin.js', import.meta.url));
   // Al correr desde las fuentes (pruebas), apunta al binario compilado.
   bin = bin.replace(/([\\/])src([\\/])bin\.js$/, '$1dist$2bin.js');
   // `2>/dev/null || true`: si el repo se movió o falta Node, el hook no hace ruido ni sale con error.
-  return `${quote(process.execPath)} ${quote(bin)} hook ${HOOK_MARKER} 2>/dev/null || true`;
+  return `${quote(stableNodePath(execPath, candidates, resolve))} ${quote(bin)} hook ${HOOK_MARKER} 2>/dev/null || true`;
 }
 
 function isOurs(hook: unknown): boolean {

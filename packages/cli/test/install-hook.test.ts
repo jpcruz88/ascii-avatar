@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { HOOK_MARKER, defaultHookCommand, installHook, uninstallHook } from '../src/commands/install-hook.js';
+import { HOOK_MARKER, defaultHookCommand, installHook, stableNodePath, uninstallHook } from '../src/commands/install-hook.js';
 
 let dir: string;
 let file: string;
@@ -138,9 +138,11 @@ describe('installHook', () => {
     installHook(file);
     const command: string = read().hooks.Stop[0].hooks[0].command;
     expect(command).toBe(defaultHookCommand());
-    expect(command).toContain(`"${process.execPath}"`);
+    // En Homebrew el Cellar se sustituye por el enlace estable; en otras máquinas queda execPath.
+    const node = stableNodePath();
+    expect(command).toContain(`"${node}"`);
     const distBin = fileURLToPath(new URL('../dist/bin.js', import.meta.url));
-    expect(command).toBe(`"${process.execPath}" "${distBin}" hook --from-ascii-avatar 2>/dev/null || true`);
+    expect(command).toBe(`"${node}" "${distBin}" hook --from-ascii-avatar 2>/dev/null || true`);
     expect(command).toContain(HOOK_MARKER);
     // Detectado como propio: una segunda instalación no duplica.
     expect(installHook(file).changed).toBe(false);
@@ -221,5 +223,51 @@ describe('avatar install-hook (proceso real)', () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(/JSON|válido/i);
     expect(readFileSync(file, 'utf8')).toBe('no json');
+  });
+});
+
+describe('stableNodePath', () => {
+  const cellar = '/opt/homebrew/Cellar/node/26.12.0/bin/node';
+  const stable = '/opt/homebrew/bin/node';
+  const fixedResolver = (map: Record<string, string>) => (p: string): string => {
+    const real = map[p];
+    if (real === undefined) throw new Error(`ENOENT: ${p}`);
+    return real;
+  };
+
+  it('en Homebrew cambia la ruta versionada del Cellar por el enlace estable si apunta al mismo binario', () => {
+    const resolve = fixedResolver({ [cellar]: cellar, [stable]: cellar });
+    expect(stableNodePath(cellar, [stable, '/usr/local/bin/node'], resolve)).toBe(stable);
+  });
+
+  it('prueba los candidatos en orden y salta los que no existen', () => {
+    const intel = '/usr/local/bin/node';
+    const resolve = fixedResolver({ [cellar]: cellar, [intel]: cellar });
+    expect(stableNodePath(cellar, [stable, intel], resolve)).toBe(intel);
+  });
+
+  it('si el enlace estable apunta a otro binario, conserva execPath', () => {
+    const resolve = fixedResolver({ [cellar]: cellar, [stable]: '/opt/homebrew/Cellar/node/25.0.0/bin/node' });
+    expect(stableNodePath(cellar, [stable], resolve)).toBe(cellar);
+  });
+
+  it('si ningún enlace estable existe, conserva execPath', () => {
+    const resolve = fixedResolver({ [cellar]: cellar });
+    expect(stableNodePath(cellar, [stable, '/usr/local/bin/node'], resolve)).toBe(cellar);
+  });
+
+  it('una ruta fuera de /Cellar/ se devuelve tal cual, sin consultar nada', () => {
+    const resolve = (): string => {
+      throw new Error('no debe llamarse');
+    };
+    expect(stableNodePath('/Users/jp/.nvm/versions/node/v26/bin/node', [stable], resolve)).toBe(
+      '/Users/jp/.nvm/versions/node/v26/bin/node',
+    );
+  });
+
+  it('defaultHookCommand usa la ruta estable que se le inyecta', () => {
+    const resolve = fixedResolver({ [cellar]: cellar, [stable]: cellar });
+    expect(defaultHookCommand(cellar, [stable], resolve)).toContain(`"${stable}" `);
+    expect(defaultHookCommand(cellar, [stable], resolve)).not.toContain('Cellar');
   });
 });
