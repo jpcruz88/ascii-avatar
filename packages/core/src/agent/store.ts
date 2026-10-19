@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { decodeImage } from '../ascii/decode.js';
-import { imageToAscii, mergeToneRanges, toneRange } from '../ascii/convert.js';
+import { grabadoTone, imageToAscii } from '../ascii/convert.js';
 import type { AsciiFrame, AsciiMode, RawImage } from '../ascii/types.js';
 import { FACE_IDS, type FaceId } from '../faces.js';
 import { writeFileAtomic } from './atomic.js';
@@ -194,7 +194,7 @@ export async function loadAtlas(
   }
   const tone =
     opts.mode === 'grabado'
-      ? mergeToneRanges(FACE_IDS.map((id) => toneRange(images[id])))
+      ? grabadoTone(FACE_IDS.map((id) => images[id]), opts.cols)
       : undefined;
   const atlas = {} as Record<FaceId, AsciiFrame>;
   for (const id of FACE_IDS) {

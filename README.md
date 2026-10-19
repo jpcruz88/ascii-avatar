@@ -165,7 +165,7 @@ Opciones:
 - `--agente <nombre>`: usa ese agente en lugar del activo.
 - `--cols <n>`: ancho de la cara en columnas, entre 20 y 500 (por defecto 70; nunca pasa del ancho real de la terminal).
 - `--modo grabado|glyphs|halfblock`: el aspecto de la cara. Por defecto es `grabado`.
-  - `grabado` (por defecto): blanco y negro, como los grabados en ASCII. Tinta oscura (`#141414`) sobre papel claro (`#FAFAF7`) con una rampa de 70 caracteres donde lo oscuro es lo más denso. Antes de convertir, la imagen se pasa a grises, se estira el contraste (con un solo rango para las ocho caras, para que no parpadeen al alternarlas), se afina el contraste (x1,25, -20) y un viñeteado radial difumina el fondo hacia el blanco. El panel pinta su propio papel, así que se ve igual en una terminal oscura o clara.
+  - `grabado` (por defecto): blanco y negro, como los grabados en ASCII. Tinta oscura (`#141414`) sobre papel claro (`#FAFAF7`) con una rampa de 70 caracteres donde lo oscuro es lo más denso. Antes de convertir, la imagen se pasa a grises, se estira el contraste por percentiles 1 %-99 % (antes y después del viñeteado, con un solo rango para las ocho caras, para que no parpadeen al alternarlas), se afina el contraste (x1,25, -20) y un viñeteado radial difumina el fondo hacia el blanco. El panel pinta su propio papel, así que se ve igual en una terminal oscura o clara.
   - `glyphs`: un carácter de una rampa de densidad por celda, con el color de la foto en el frente.
   - `halfblock`: medios bloques `▀` con color de 24 bits de frente y de fondo; a color, con más definición.
 

@@ -8,7 +8,7 @@ import {
   GRABADO_RAMP,
   INK,
   PAPER,
-  toneRange,
+  grabadoTone,
   type AsciiFrame,
   type RawImage,
 } from '../src/index.js';
@@ -217,23 +217,73 @@ describe('modo grabado', () => {
     );
   });
 
-  it('toneRange da el mínimo y el máximo de luminosidad en 0..1', () => {
-    const t = toneRange(gradient(32, 4));
-    expect(t.min).toBe(0);
-    expect(t.max).toBe(1);
-    expect(toneRange(solid(4, 4, 51))).toEqual({ min: 0.2, max: 0.2 });
+  it('grabadoTone calcula percentiles 1 %/99 %, no mínimo y máximo', () => {
+    // 100x100 de gris 100 con 0,5 % de píxeles negros y 0,5 % de blancos: los extremos no cuentan.
+    const img = solid(100, 100, 100);
+    for (let i = 0; i < 50; i++) {
+      img.data.fill(0, i * 4, i * 4 + 3);
+      img.data.fill(255, (9999 - i) * 4, (9999 - i) * 4 + 3);
+    }
+    const { first } = grabadoTone([img], 10, false);
+    expect(first.min).toBeCloseTo(100 / 255, 5);
+    expect(first.max).toBeCloseTo(100 / 255, 5);
   });
 
   it('un rango de tono compartido pesa igual en dos imágenes distintas', () => {
     const a = solid(8, 8, 100);
     const b = solid(8, 8, 100);
-    // Sin rango compartido, cada una estiraría distinto; con él, el mismo gris da el mismo carácter.
-    const t = { min: 0, max: 1 };
+    const t = {
+      first: { min: 0, max: 1 },
+      second: { min: 0, max: 1 },
+    };
     const fa = imageToAscii(a, { ...sinViñeta, tone: t });
     const fb = imageToAscii(b, { ...sinViñeta, tone: t });
     expect(fa.cells[0]?.ch).toBe(fb.cells[0]?.ch);
-    const estirado = imageToAscii(a, { ...sinViñeta, tone: { min: 100 / 255, max: 1 } });
+    const estirado = imageToAscii(a, {
+      ...sinViñeta,
+      tone: { first: { min: 100 / 255, max: 1 }, second: { min: 0, max: 1 } },
+    });
     expect(estirado.cells[0]?.ch).not.toBe(fa.cells[0]?.ch);
+  });
+
+  it('regresión: el estiramiento es por percentiles, no por mínimo/máximo (no queda lavado)', () => {
+    // Grises de 90 a 220 en horizontal y 2 % de píxeles negros puros repartidos. Con mínimo/máximo
+    // el negro fijaría el mínimo en 0 y la zona más oscura quedaría a media rampa.
+    const w = 200;
+    const h = 100;
+    const img = solid(w, h, 0);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const v = Math.round(90 + (x / (w - 1)) * 130);
+        const i = (y * w + x) * 4;
+        const negro = (y * w + x) % 50 === 0;
+        img.data[i] = img.data[i + 1] = img.data[i + 2] = negro ? 0 : v;
+      }
+    }
+    const f = imageToAscii(img, { cols: 20, mode: 'grabado', vignette: false });
+    const dense = GRABADO_RAMP.length - 10;
+    const row = Math.floor(f.rows / 2);
+    const idx = (col: number): number => GRABADO_RAMP.indexOf(f.cells[row * f.cols + col]!.ch);
+    expect(idx(0)).toBeGreaterThanOrEqual(dense);
+    expect(idx(1)).toBeGreaterThanOrEqual(dense - 12);
+    expect(idx(f.cols - 1)).toBeLessThan(10);
+  });
+
+  it('el estiramiento de percentiles ignora un grupo de píxeles extremos de menos de 1 %', () => {
+    const w = 200;
+    const h = 100;
+    const img = solid(w, h, 0);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const v = Math.round(90 + (x / (w - 1)) * 130);
+        const i = (y * w + x) * 4;
+        const parche = x >= 195 && y >= 90; // una celda entera de 40 columnas (0,25 % de la imagen), negro puro
+        img.data[i] = img.data[i + 1] = img.data[i + 2] = parche ? 0 : v;
+      }
+    }
+    const f = imageToAscii(img, { cols: 40, mode: 'grabado', vignette: false });
+    const row = Math.floor(f.rows / 2);
+    expect(GRABADO_RAMP.indexOf(f.cells[row * f.cols]!.ch)).toBeGreaterThanOrEqual(GRABADO_RAMP.length - 10);
   });
 
   it('frameToAnsi emite tinta y papel una vez por tramo, no por celda', () => {

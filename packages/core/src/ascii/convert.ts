@@ -90,58 +90,117 @@ function pixelLuma(data: Uint8Array, i: number): number {
   return (2126 * mix(data[i]) + 7152 * mix(data[i + 1]) + 722 * mix(data[i + 2])) / 2550000;
 }
 
-/** Mínimo y máximo de luminosidad (0..1) de la imagen: el rango que estira el contraste. */
-export function toneRange(img: RawImage): ToneRange {
-  let min = 1;
-  let max = 0;
-  for (let i = 0; i + 3 < img.data.length; i += 4) {
-    const v = pixelLuma(img.data, i);
-    if (v < min) min = v;
-    if (v > max) max = v;
-  }
-  return min > max ? { min: 0, max: 1 } : { min, max };
-}
+/** Percentiles del estiramiento de contraste, como `normalise()` de sharp. */
+export const TONE_PERCENTILES = { low: 1, high: 99 } as const;
 
-/** Une varios rangos en uno que los cubre a todos. */
-export function mergeToneRanges(ranges: readonly ToneRange[]): ToneRange {
-  if (ranges.length === 0) return { min: 0, max: 1 };
-  return {
-    min: Math.min(...ranges.map((r) => r.min)),
-    max: Math.max(...ranges.map((r) => r.max)),
-  };
-}
+const BINS = 256;
 
 const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
+const toBin = (v: number): number => Math.min(BINS - 1, Math.max(0, Math.round(v * (BINS - 1))));
+
+/** Histograma de 256 niveles de un plano de tono 0..1. */
+function histogram(plane: ArrayLike<number>): Uint32Array {
+  const h = new Uint32Array(BINS);
+  for (let i = 0; i < plane.length; i++) h[toBin(plane[i] ?? 0)]!++;
+  return h;
+}
 
 /**
- * Pasa la imagen a un plano de tono 0..1 (0 = tinta, 1 = papel): gris, estiramiento de
- * contraste con `tone`, ajuste lineal y viñeteado hacia blanco. Si el rango es casi nulo
- * (imagen de un solo tono) no se estira, para no dividir entre cero.
+ * Rango [bajo, alto] (0..1) entre los percentiles 1 % y 99 % del histograma, igual que el
+ * `normalise()` de sharp: el primer nivel cuya cuenta acumulada pasa de cada umbral.
  */
-function toneMap(img: RawImage, tone: ToneRange, vignette: boolean): Float32Array {
-  const { width, height, data } = img;
-  const out = new Float32Array(width * height);
-  const span = tone.max - tone.min;
-  const stretch = span > 1e-6;
+function percentileRange(hist: Uint32Array): ToneRange {
+  let total = 0;
+  for (const n of hist) total += n;
+  if (total === 0) return { min: 0, max: 1 };
+  const find = (pct: number): number => {
+    const limit = (total * pct) / 100;
+    let acc = 0;
+    for (let b = 0; b < BINS; b++) {
+      acc += hist[b] ?? 0;
+      if (acc > limit) return b;
+    }
+    return BINS - 1;
+  };
+  return { min: find(TONE_PERCENTILES.low) / (BINS - 1), max: find(TONE_PERCENTILES.high) / (BINS - 1) };
+}
+
+/** Estira v con el rango; si el rango es casi nulo (un solo tono) lo deja igual, sin dividir entre cero. */
+function stretch(v: number, r: ToneRange): number {
+  const span = r.max - r.min;
+  return span > 1e-6 ? clamp01((v - r.min) / span) : v;
+}
+
+/**
+ * Rango de tono del modo `grabado`, en dos etapas como el prototipo aprobado:
+ * - `first`: percentiles de la luminosidad de la imagen completa, antes del viñeteado.
+ * - `second`: percentiles de las celdas ya viñeteadas, después del viñeteado.
+ */
+export interface GrabadoTone {
+  first: ToneRange;
+  second: ToneRange;
+}
+
+/** Plano de luminosidad (0..1) de la imagen, un valor por píxel. */
+function lumaPlane(img: RawImage): Float32Array {
+  const out = new Float32Array(img.width * img.height);
+  for (let i = 0; i < out.length; i++) out[i] = pixelLuma(img.data, i * 4);
+  return out;
+}
+
+/**
+ * Etapa 1 y viñeteado: estira la luminosidad con `first`, mezcla hacia blanco con el viñeteado
+ * (modo pantalla: 1 - (1 - v) * (1 - máscara)) y promedia por área en `cols` x `rows` celdas.
+ */
+function cellTones(img: RawImage, luma: Float32Array, first: ToneRange, vignette: boolean, cols: number, rows: number): Float32Array {
+  const { width, height } = img;
   const diag = Math.sqrt((width * width + height * height) / 2);
   const radius = VIGNETTE.radius * diag;
   const cx = VIGNETTE.centerX * width;
   const cy = VIGNETTE.centerY * height;
   const fade = VIGNETTE.whiteFrom - VIGNETTE.clearUntil;
+  const plane = new Float32Array(width * height);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      let v = pixelLuma(data, (y * width + x) * 4);
-      if (stretch) v = clamp01((v - tone.min) / span);
-      v = clamp01(v * TONE_GAIN + TONE_OFFSET);
+      let v = stretch(luma[y * width + x] ?? 0, first);
       if (vignette) {
         const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy) / radius;
         const t = clamp01((d - VIGNETTE.clearUntil) / fade);
-        v += (1 - v) * t;
+        v = 1 - (1 - v) * (1 - t);
       }
-      out[y * width + x] = v;
+      plane[y * width + x] = v;
     }
   }
-  return out;
+  const cw = width / cols;
+  const ch = height / rows;
+  const cells = new Float32Array(cols * rows);
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      cells[row * cols + col] = averageTone(plane, width, height, col * cw, (col + 1) * cw, row * ch, (row + 1) * ch);
+    }
+  }
+  return cells;
+}
+
+const rowsFor = (img: RawImage, cols: number): number =>
+  Math.max(1, Math.round(((img.height / img.width) * cols) / 2));
+
+/**
+ * Calcula el rango de tono compartido de varias imágenes (las 8 caras de un agente), para que al
+ * alternarlas no parpadeen: `first` sale de la luminosidad de todas juntas y `second` de las celdas
+ * viñeteadas de todas juntas. Determinista.
+ */
+export function grabadoTone(images: readonly RawImage[], cols: number, vignette = true): GrabadoTone {
+  const lumas = images.map(lumaPlane);
+  const h1 = new Uint32Array(BINS);
+  for (const l of lumas) histogram(l).forEach((n, b) => (h1[b]! += n));
+  const first = percentileRange(h1);
+  const h2 = new Uint32Array(BINS);
+  images.forEach((img, i) => {
+    const cells = cellTones(img, lumas[i]!, first, vignette, cols, rowsFor(img, cols));
+    histogram(cells).forEach((n, b) => (h2[b]! += n));
+  });
+  return { first, second: percentileRange(h2) };
 }
 
 /** Promedio por área del plano de tono en [x0,x1) x [y0,y1); misma ponderación que `averageRegion`. */
@@ -183,8 +242,8 @@ export function imageToAscii(
   opts: {
     cols: number;
     mode: AsciiMode;
-    /** Solo `grabado`: rango de tono compartido (p. ej. el de las 8 caras). Por defecto, el de esta imagen. */
-    tone?: ToneRange;
+    /** Solo `grabado`: rango de tono compartido (p. ej. el de las 8 caras, ver `grabadoTone`). Por defecto, el de esta imagen. */
+    tone?: GrabadoTone;
     /** Solo `grabado`: aplica el viñeteado. Por defecto sí. */
     vignette?: boolean;
   },
@@ -201,14 +260,22 @@ export function imageToAscii(
   const cw = img.width / cols;
   const ch = img.height / rows;
   const cells: Cell[] = [];
-  const plane = mode === 'grabado' ? toneMap(img, opts.tone ?? toneRange(img), opts.vignette ?? true) : null;
+  let tones: Float32Array | null = null;
+  if (mode === 'grabado') {
+    const vignette = opts.vignette ?? true;
+    const tone = opts.tone ?? grabadoTone([img], cols, vignette);
+    tones = cellTones(img, lumaPlane(img), tone.first, vignette, cols, rows);
+    for (let i = 0; i < tones.length; i++) {
+      tones[i] = clamp01(stretch(tones[i] ?? 1, tone.second) * TONE_GAIN + TONE_OFFSET);
+    }
+  }
 
   for (let row = 0; row < rows; row++) {
     const y0 = row * ch;
     for (let col = 0; col < cols; col++) {
       const x0 = col * cw;
-      if (plane !== null) {
-        const v = averageTone(plane, img.width, img.height, x0, x0 + cw, y0, y0 + ch);
+      if (tones !== null) {
+        const v = tones[row * cols + col] ?? 1;
         const idx = Math.min(GRABADO_RAMP.length - 1, Math.floor((1 - v) * GRABADO_RAMP.length));
         cells.push({ ch: GRABADO_RAMP.charAt(idx), fg: { ...INK }, bg: { ...PAPER } });
       } else if (mode === 'halfblock') {
