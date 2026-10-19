@@ -282,6 +282,7 @@ export async function runMovimientos(o: MovimientosOptions): Promise<Movimientos
     if (!pre.ok) return { status: 'failed', message: pre.message };
     if (o.signal?.aborted) return { status: 'cancelled', message: 'Cancelado: no se cambió ningún clip.' };
 
+    out(`Generando ${clips.join(', ')} con LivePortrait (Ctrl-C cancela)…`);
     const tmp = mkdtempSync(join(o.tmpBase ?? tmpdir(), 'ascii-avatar-movimientos-'));
     try {
       const cmd = buildCommand({ ...pre, script: o.script ?? DEFAULT_SCRIPT, out: tmp, clips, env });
@@ -354,7 +355,6 @@ export async function runMovimientosCli(o: { root: string; name: string; livepor
   };
   process.on('SIGINT', onSigint);
   try {
-    console.log(`Generando ${(clips ?? CLIP_IDS).join(', ')} con LivePortrait (Ctrl-C cancela)…`);
     const r = await runMovimientos({
       root: o.root,
       name: o.name,

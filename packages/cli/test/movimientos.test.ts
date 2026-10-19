@@ -266,6 +266,7 @@ describe('runMovimientos', () => {
     const r = await run({ clips: ['nod'], spawn: fakeSpawner(calls, { noise: true }), progress: (p) => progress.push(p) });
     expect(r.status).toBe('done');
     expect(r.message).toMatch(/nod/);
+    expect(lines[0]).toMatch(/^Generando nod con LivePortrait/);
     expect(listClips(root, 'ana')).toEqual({ nod: 17 });
     expect(progress).toHaveLength(17);
     expect(progress[0]).toEqual({ clip: 'nod', frame: 1, total: 17 });
@@ -309,6 +310,7 @@ describe('runMovimientos', () => {
     const r = await run({ spawn: fakeSpawner(calls) });
     expect(r.status).toBe('failed');
     expect(calls).toHaveLength(0);
+    expect(lines).toEqual([]); // no anuncia «Generando…» si no va a generar
   });
 
   it('si el proceso falla no importa nada, borra la carpeta temporal y muestra el error', async () => {
