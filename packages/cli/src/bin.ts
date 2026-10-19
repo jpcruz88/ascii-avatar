@@ -4,7 +4,7 @@
 // cada turno de Claude Code y no puede tocar `sharp` ni `@ascii-avatar/*` (una falla nativa lo rompería).
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { parseArgs, unknownFlags, type ParsedArgs } from './args.js';
+import { isModo, parseArgs, unknownFlags, type ParsedArgs } from './args.js';
 import { defaultRoot } from './paths.js';
 
 const HELP = `avatar: avatar ASCII animado para la terminal.
@@ -13,7 +13,7 @@ Uso:
   avatar create <nombre> [--foto <ruta>]   Crea un agente a partir de una foto (usa Gemini)
   avatar create <nombre> --caras <carpeta> [--foto <ruta>]
                                            Importa tus propias 8 caras PNG (sin Gemini, sin llave, sin costo)
-  avatar panel [--agente <nombre>] [--cols <n>] [--modo glyphs|halfblock]
+  avatar panel [--agente <nombre>] [--cols <n>] [--modo grabado|glyphs|halfblock]
                                            Abre el panel (tecla v: voz, q: salir)
   avatar voice on|off                      Activa o desactiva la voz
   avatar install-hook [--uninstall] [--settings <ruta>]
@@ -145,8 +145,8 @@ async function panel(args: ParsedArgs, root: string): Promise<number> {
     if (cols !== undefined && !(/^\d+$/.test(cols) && Number(cols) >= 20 && Number(cols) <= 500)) {
       return fail('--cols debe ser un número entero entre 20 y 500.');
     }
-    if (modo !== undefined && modo !== 'glyphs' && modo !== 'halfblock') {
-      return fail('--modo debe ser glyphs o halfblock.');
+    if (modo !== undefined && !isModo(modo)) {
+      return fail('--modo debe ser grabado, glyphs o halfblock.');
     }
     const { runPanel } = await import('./commands/panel.js');
     return await runPanel({

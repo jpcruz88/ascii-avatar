@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseArgs, unknownFlags } from '../src/args.js';
+import { isModo, parseArgs, unknownFlags } from '../src/args.js';
 
 describe('parseArgs', () => {
   it('separa comando, posicionales y banderas con valor', () => {
@@ -61,5 +61,22 @@ describe('unknownFlags', () => {
     expect(unknownFlags('install-hook', { unistall: true })).toEqual(['unistall']);
     expect(unknownFlags('voice', { foto: 'x' })).toEqual(['foto']);
     expect(unknownFlags('create', { agente: 'x', foto: 'y' })).toEqual(['agente']);
+  });
+});
+
+describe('--modo', () => {
+  it('parseArgs acepta --modo grabado y --modo=grabado', () => {
+    expect(parseArgs(['panel', '--modo', 'grabado']).flags).toEqual({ modo: 'grabado' });
+    expect(parseArgs(['panel', '--modo=grabado']).flags).toEqual({ modo: 'grabado' });
+    expect(unknownFlags('panel', { modo: 'grabado' })).toEqual([]);
+  });
+
+  it('isModo reconoce los tres modos y nada más', () => {
+    expect(isModo('grabado')).toBe(true);
+    expect(isModo('glyphs')).toBe(true);
+    expect(isModo('halfblock')).toBe(true);
+    expect(isModo('color')).toBe(false);
+    expect(isModo(true)).toBe(false);
+    expect(isModo(undefined)).toBe(false);
   });
 });

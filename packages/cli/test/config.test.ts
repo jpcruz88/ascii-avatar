@@ -16,9 +16,17 @@ describe('config', () => {
       activeAgent: null,
       voice: false,
       dailyLimitUsd: 0.3,
-      mode: 'halfblock',
+      mode: 'grabado',
       cols: 70,
     });
+  });
+
+  it('el modo por defecto es grabado y se respeta un modo guardado', () => {
+    expect(loadConfig(root).mode).toBe('grabado');
+    writeFileSync(configPath(root), JSON.stringify({ mode: 'halfblock' }));
+    expect(loadConfig(root).mode).toBe('halfblock');
+    writeFileSync(configPath(root), JSON.stringify({ mode: 'grabado' }));
+    expect(loadConfig(root).mode).toBe('grabado');
   });
 
   it('guarda y vuelve a leer, sin dejar temporales', () => {
@@ -45,7 +53,7 @@ describe('config', () => {
       activeAgent: 'luna',
       voice: false,
       dailyLimitUsd: 0.3,
-      mode: 'halfblock',
+      mode: 'grabado',
       cols: 70,
     });
   });

@@ -11,12 +11,12 @@ export interface CliConfig {
   cols: number;
 }
 
-/** Valores por defecto. `mode` es provisional hasta que el usuario elija en el experimento de la Task 4. */
+/** Valores por defecto. El modo `grabado` (blanco y negro, tinta sobre papel) es el aspecto por defecto. */
 export const DEFAULT_CONFIG: Readonly<CliConfig> = {
   activeAgent: null,
   voice: false,
   dailyLimitUsd: DEFAULT_DAILY_LIMIT_USD,
-  mode: 'halfblock',
+  mode: 'grabado',
   cols: 70,
 };
 
@@ -49,7 +49,7 @@ export function loadConfig(root: string): CliConfig {
       typeof c.dailyLimitUsd === 'number' && Number.isFinite(c.dailyLimitUsd) && c.dailyLimitUsd >= 0
         ? c.dailyLimitUsd
         : d.dailyLimitUsd,
-    mode: c.mode === 'glyphs' || c.mode === 'halfblock' ? c.mode : d.mode,
+    mode: c.mode === 'grabado' || c.mode === 'glyphs' || c.mode === 'halfblock' ? c.mode : d.mode,
     cols:
       typeof c.cols === 'number' && Number.isInteger(c.cols) && c.cols >= 20 && c.cols <= 500
         ? c.cols

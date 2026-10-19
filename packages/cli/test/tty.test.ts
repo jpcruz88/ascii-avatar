@@ -1,0 +1,124 @@
+import { EventEmitter } from 'node:events';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { runTty, type TtyOptions } from '../src/tty.js';
+import type { AsciiFrame } from '@ascii-avatar/core';
+
+const frame: AsciiFrame = {
+  cols: 2,
+  rows: 1,
+  cells: [
+    { ch: 'a', fg: { r: 1, g: 2, b: 3 }, bg: null },
+    { ch: 'b', fg: { r: 1, g: 2, b: 3 }, bg: null },
+  ],
+};
+
+const eio = (): NodeJS.ErrnoException =>
+  Object.assign(new Error('write EIO'), { code: 'EIO', errno: -5, syscall: 'write' });
+
+/** Salida falsa: registra lo escrito y puede fallar como una terminal cuya ventana ya se cerró. */
+class FakeStdout extends EventEmitter {
+  columns = 60;
+  rows = 20;
+  writes: string[] = [];
+  throwOnWrite = false;
+  /** Número de escritura (desde 1) a partir de la cual falla, o 0 para nunca. */
+  failFrom = 0;
+  write(chunk: string): boolean {
+    this.writes.push(chunk);
+    if (this.throwOnWrite || (this.failFrom > 0 && this.writes.length >= this.failFrom)) throw eio();
+    return true;
+  }
+}
+
+class FakeStdin extends EventEmitter {
+  isTTY = false;
+  setRawMode(): this {
+    return this;
+  }
+  resume(): this {
+    return this;
+  }
+  pause(): this {
+    return this;
+  }
+}
+
+function options(stdout: FakeStdout, stdin = new FakeStdin()): TtyOptions {
+  return {
+    agent: 'luna',
+    getFrame: () => frame,
+    voiceOn: () => false,
+    spentToday: () => 0,
+    notice: () => null,
+    onToggleVoice: () => undefined,
+    stdout: stdout as unknown as NodeJS.WriteStream,
+    stdin: stdin as unknown as NodeJS.ReadStream,
+  };
+}
+
+afterEach(() => vi.restoreAllMocks());
+
+describe('runTty con la terminal cerrada', () => {
+  it('si escribir lanza EIO, el panel termina sin lanzar', async () => {
+    const stdout = new FakeStdout();
+    stdout.throwOnWrite = true;
+    await expect(runTty(options(stdout))).resolves.toBeUndefined();
+  });
+
+  it('si el EIO llega a media sesión, termina en silencio y restaura sin lanzar', async () => {
+    const stdout = new FakeStdout();
+    stdout.failFrom = 3;
+    await expect(runTty(options(stdout))).resolves.toBeUndefined();
+    // Se intentó restaurar la pantalla aunque la escritura falle.
+    expect(stdout.writes.some((w) => w.includes('\x1b[?1049l'))).toBe(true);
+  });
+
+  it('un evento error EIO en stdout cierra el panel y no queda sin manejar', async () => {
+    const stdout = new FakeStdout();
+    const done = runTty(options(stdout));
+    stdout.emit('error', eio());
+    await expect(done).resolves.toBeUndefined();
+    // El error asíncrono de la escritura de restauración llega tarde: tampoco debe tumbar el proceso.
+    expect(() => stdout.emit('error', eio())).not.toThrow();
+  });
+
+  it('EPIPE también se traga', async () => {
+    const stdout = new FakeStdout();
+    const done = runTty(options(stdout));
+    stdout.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
+    await expect(done).resolves.toBeUndefined();
+  });
+
+  it('tras salir con q, un EIO tardío en stdout no lanza', async () => {
+    const stdout = new FakeStdout();
+    const stdin = new FakeStdin();
+    const done = runTty(options(stdout, stdin));
+    stdin.emit('data', Buffer.from('q'));
+    await done;
+    expect(() => stdout.emit('error', eio())).not.toThrow();
+  });
+
+  it('un error distinto de EIO/EPIPE no se esconde: el panel termina y el error se reporta', async () => {
+    const stdout = new FakeStdout();
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    const done = runTty(options(stdout));
+    stdout.emit('error', Object.assign(new Error('boom'), { code: 'EACCES' }));
+    await done;
+    expect(stderr).toHaveBeenCalled();
+    expect(exit).toHaveBeenCalledWith(1);
+  });
+});
+
+describe('runTty en modo papel', () => {
+  it('con paper pinta tinta sobre papel y restaura al salir', async () => {
+    const stdout = new FakeStdout();
+    const stdin = new FakeStdin();
+    const done = runTty({ ...options(stdout, stdin), paper: true });
+    stdin.emit('data', Buffer.from('q'));
+    await done;
+    const all = stdout.writes.join('');
+    expect(all).toContain('\x1b[48;2;250;250;247m');
+    expect(all.endsWith('\x1b[0m\x1b[?25h\x1b[?1049l')).toBe(true);
+  });
+});

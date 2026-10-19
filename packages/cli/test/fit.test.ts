@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AsciiFrame } from '@ascii-avatar/core';
+import { INK, PAPER, type AsciiFrame } from '@ascii-avatar/core';
 import { composeScreen, fitFrame, footerText } from '../src/tty.js';
 
 /** Cuadro de prueba: cada celda lleva la columna (módulo 10) como carácter, para verificar recortes. */
@@ -139,5 +139,46 @@ describe('footerText sin lectura del gasto', () => {
     expect(footerText({ agent: 'luna', voice: true, spent: null, notice: null })).toBe(
       'luna · voz: on · gasto hoy: ?',
     );
+  });
+});
+
+describe('composeScreen en modo papel (grabado)', () => {
+  const footer = 'luna · voz: off · gasto hoy: $0.000';
+  const ink = `\x1b[38;2;${INK.r};${INK.g};${INK.b}m`;
+  const paper = `\x1b[48;2;${PAPER.r};${PAPER.g};${PAPER.b}m`;
+  const base = { frame: makeFrame(30, 2), termCols: 60, termRows: 12, footer, paper: true };
+
+  it('pinta papel en cada fila: margen, filas sobrantes y borrado hasta fin de línea', () => {
+    const out = composeScreen(base);
+    // Cada fila (11 de imagen y relleno + pie) empieza por tinta y papel, también las vacías.
+    for (let row = 1; row <= 12; row++) {
+      expect(out).toContain(`\x1b[${row};1H${ink}${paper}`);
+    }
+    // El margen izquierdo de la fila 1 va sobre papel, antes de las celdas.
+    expect(out).toContain(`\x1b[1;1H${ink}${paper}${' '.repeat(15)}`);
+    // El borrado hasta fin de línea siempre se hace con el papel activo.
+    for (const piece of out.split('\x1b[K').slice(0, -1)) {
+      expect(piece.lastIndexOf(paper)).toBeGreaterThan(piece.lastIndexOf('\x1b[0m'));
+    }
+  });
+
+  it('el pie es tinta sobre papel, legible y sin atenuar', () => {
+    const out = composeScreen(base);
+    expect(out).toContain(`\x1b[12;1H${ink}${paper}${footer}`);
+    expect(out).not.toContain('\x1b[2m');
+  });
+
+  it('el borrado de pantalla completo se hace con el papel puesto', () => {
+    expect(composeScreen({ ...base, clear: true }).startsWith(`${paper}\x1b[2J`)).toBe(true);
+  });
+
+  it('el aviso de terminal pequeña también va en tinta sobre papel', () => {
+    const out = composeScreen({ ...base, termCols: 30, termRows: 8 });
+    expect(out.startsWith(`${ink}${paper}`)).toBe(true);
+    expect(stripAnsi(out)).toContain('Terminal muy pequeña');
+  });
+
+  it('sin la opción papel no se pinta fondo (glyphs y halfblock siguen igual)', () => {
+    expect(composeScreen({ ...base, paper: false })).not.toContain('\x1b[48;2;');
   });
 });

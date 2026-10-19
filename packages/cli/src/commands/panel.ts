@@ -69,7 +69,8 @@ export async function runPanel(opts: PanelOptions): Promise<number> {
 
   ensureRoot(root);
   const cols = Math.min(opts.cols ?? config.cols, process.stdout.columns || config.cols);
-  const atlas = await loadAtlas(root, name, { cols, mode: opts.mode ?? config.mode });
+  const mode = opts.mode ?? config.mode;
+  const atlas = await loadAtlas(root, name, { cols, mode });
 
   let player: AudioPlayer = SILENT_PLAYER;
   let tts = buildTts(root);
@@ -108,6 +109,7 @@ export async function runPanel(opts: PanelOptions): Promise<number> {
   try {
     await runTty({
       agent: name,
+      paper: mode === 'grabado',
       getFrame: () => atlas[animator.frame(now())],
       voiceOn: () => controller.voiceOn(),
       spentToday: () => controller.spentToday(),

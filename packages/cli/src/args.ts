@@ -4,6 +4,13 @@ export interface ParsedArgs {
   flags: Record<string, string | true>;
 }
 
+/** Modos de dibujo del panel (`--modo`). Se repite aquí para no importar `core` en la ruta del hook. */
+export const MODOS = ['grabado', 'glyphs', 'halfblock'] as const;
+
+export function isModo(value: unknown): value is (typeof MODOS)[number] {
+  return typeof value === 'string' && (MODOS as readonly string[]).includes(value);
+}
+
 /** Banderas que llevan un valor; las demás son interruptores. */
 export const VALUE_FLAGS: ReadonlySet<string> = new Set(['foto', 'caras', 'agente', 'cols', 'modo', 'settings']);
 
