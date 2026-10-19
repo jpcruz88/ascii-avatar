@@ -24,11 +24,14 @@ export {
   InvalidAgentNameError,
   InvalidFaceImageError,
   InvalidPhotoError,
+  InvalidVoiceError,
+  MAX_VOICE_STYLE_LENGTH,
   createAgent,
   loadAgent,
   loadAtlas,
   missingFaces,
   saveFace,
+  updateAgentVoice,
   validateAgentName,
 } from './agent/store.js';
 export type { AgentConfig, CreateAgentOptions } from './agent/store.js';

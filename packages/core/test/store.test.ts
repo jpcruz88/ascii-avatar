@@ -17,11 +17,13 @@ import {
   InvalidAgentNameError,
   InvalidFaceImageError,
   InvalidPhotoError,
+  InvalidVoiceError,
   createAgent,
   loadAgent,
   loadAtlas,
   missingFaces,
   saveFace,
+  updateAgentVoice,
   validateAgentName,
   type FaceId,
 } from '../src/index.js';
@@ -271,6 +273,8 @@ describe('loadAgent con agent.json dañado', () => {
     ['createdAt mal tipado', { ...good, createdAt: 5 }],
     ['promptsVersion mal tipada', { ...good, promptsVersion: '1' }],
     ['name distinto de la carpeta', { ...good, name: 'otro' }],
+    ['voiceStyle numérico', { ...good, voiceStyle: 3 }],
+    ['voiceStyle null', { ...good, voiceStyle: null }],
   ])('forma incorrecta (%s) lanza CorruptAgentError', (_t, value) => {
     writeRaw('luna', JSON.stringify(value));
     expect(() => loadAgent(root, 'luna')).toThrow(CorruptAgentError);
@@ -291,6 +295,127 @@ describe('loadAgent con agent.json dañado', () => {
   it('un agent.json válido sigue cargando', () => {
     writeRaw('luna', JSON.stringify(good));
     expect(loadAgent(root, 'luna')).toEqual(good);
+  });
+
+  it('sin voiceStyle carga sin esa clave', () => {
+    writeRaw('luna', JSON.stringify(good));
+    expect(loadAgent(root, 'luna').voiceStyle).toBeUndefined();
+  });
+
+  it('con voiceStyle de texto lo conserva', () => {
+    writeRaw('luna', JSON.stringify({ ...good, voiceStyle: 'pausada y cálida' }));
+    expect(loadAgent(root, 'luna').voiceStyle).toBe('pausada y cálida');
+  });
+});
+
+describe('voiceStyle en createAgent', () => {
+  it('guarda el estilo cuando se indica y se puede volver a leer', async () => {
+    const photo = await png4x4(10);
+    const cfg = createAgent(root, 'luna', photo, { voice: 'Algenib', voiceStyle: 'grave y pausada' });
+    expect(cfg.voiceStyle).toBe('grave y pausada');
+    expect(loadAgent(root, 'luna')).toEqual(cfg);
+  });
+
+  it('sin estilo no escribe la clave voiceStyle', async () => {
+    const photo = await png4x4(10);
+    createAgent(root, 'luna', photo);
+    const raw = JSON.parse(readFileSync(join(root, 'agents', 'luna', 'agent.json'), 'utf8'));
+    expect('voiceStyle' in raw).toBe(false);
+  });
+
+  it('rechaza un estilo de más de 300 caracteres sin crear nada', async () => {
+    const photo = await png4x4(10);
+    expect(() => createAgent(root, 'luna', photo, { voiceStyle: 'x'.repeat(301) })).toThrow(
+      InvalidVoiceError,
+    );
+    expect(existsSync(join(root, 'agents', 'luna'))).toBe(false);
+    expect(() => createAgent(root, 'luna', photo, { voiceStyle: 'x'.repeat(300) })).not.toThrow();
+  });
+});
+
+describe('updateAgentVoice', () => {
+  const agentFile = (): string => join(root, 'agents', 'luna', 'agent.json');
+
+  async function crear(): Promise<void> {
+    createAgent(root, 'luna', await png4x4(10), { personality: 'cálida' });
+  }
+
+  it('cambia la voz y conserva el resto', async () => {
+    await crear();
+    const before = loadAgent(root, 'luna');
+    const after = updateAgentVoice(root, 'luna', { voice: 'Algenib' });
+    expect(after).toEqual({ ...before, voice: 'Algenib' });
+    expect(loadAgent(root, 'luna')).toEqual(after);
+  });
+
+  it('cambia el estilo sin tocar la voz', async () => {
+    await crear();
+    const after = updateAgentVoice(root, 'luna', { voiceStyle: 'un hombre mexicano de sesenta años' });
+    expect(after.voice).toBe('Kore');
+    expect(loadAgent(root, 'luna').voiceStyle).toBe('un hombre mexicano de sesenta años');
+  });
+
+  it('voiceStyle vacío quita el estilo del archivo', async () => {
+    await crear();
+    updateAgentVoice(root, 'luna', { voiceStyle: 'grave' });
+    const after = updateAgentVoice(root, 'luna', { voiceStyle: '' });
+    expect(after.voiceStyle).toBeUndefined();
+    const raw = JSON.parse(readFileSync(agentFile(), 'utf8'));
+    expect('voiceStyle' in raw).toBe(false);
+    expect(loadAgent(root, 'luna').voiceStyle).toBeUndefined();
+  });
+
+  it('sin cambios pedidos no altera nada', async () => {
+    await crear();
+    const before = readFileSync(agentFile(), 'utf8');
+    updateAgentVoice(root, 'luna', {});
+    expect(readFileSync(agentFile(), 'utf8')).toBe(before);
+  });
+
+  it('rechaza un estilo de más de 300 caracteres y una voz vacía, sin escribir', async () => {
+    await crear();
+    const before = readFileSync(agentFile(), 'utf8');
+    expect(() => updateAgentVoice(root, 'luna', { voiceStyle: 'x'.repeat(301) })).toThrow(
+      InvalidVoiceError,
+    );
+    expect(() => updateAgentVoice(root, 'luna', { voice: '   ' })).toThrow(InvalidVoiceError);
+    expect(readFileSync(agentFile(), 'utf8')).toBe(before);
+  });
+
+  it('valida el nombre y exige que el agente exista', () => {
+    expect(() => updateAgentVoice(root, '../x', { voice: 'Kore' })).toThrow(InvalidAgentNameError);
+    expect(() => updateAgentVoice(root, 'nadie', { voice: 'Kore' })).toThrow(AgentNotFoundError);
+  });
+
+  it('no repara un agent.json dañado: lanza CorruptAgentError y lo deja igual', async () => {
+    await crear();
+    writeFileSync(agentFile(), '{"name": "lu');
+    expect(() => updateAgentVoice(root, 'luna', { voice: 'Kore' })).toThrow(CorruptAgentError);
+    expect(readFileSync(agentFile(), 'utf8')).toBe('{"name": "lu');
+  });
+
+  it('escribe de forma atómica: renombra un temporal sobre agent.json y no deja .tmp', async () => {
+    await crear();
+    vi.mocked(fs.renameSync).mockClear();
+    updateAgentVoice(root, 'luna', { voice: 'Algenib' });
+    const calls = vi.mocked(fs.renameSync).mock.calls.filter(([, to]) => String(to) === agentFile());
+    expect(calls).toHaveLength(1);
+    expect(String(calls[0]![0])).toMatch(/agent\.json\..+\.tmp$/);
+    expect(readdirSync(join(root, 'agents', 'luna')).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('si falla el renombrado, el agent.json original queda intacto y sin .tmp', async () => {
+    await crear();
+    const before = readFileSync(agentFile(), 'utf8');
+    const real = vi.mocked(fs.renameSync).getMockImplementation()!;
+    vi.mocked(fs.renameSync).mockImplementation(((from: string, to: string) => {
+      if (String(to).endsWith('agent.json')) throw new Error('disco lleno');
+      return real(from, to);
+    }) as typeof fs.renameSync);
+    expect(() => updateAgentVoice(root, 'luna', { voice: 'Algenib' })).toThrow('disco lleno');
+    vi.mocked(fs.renameSync).mockReset();
+    expect(readFileSync(agentFile(), 'utf8')).toBe(before);
+    expect(readdirSync(join(root, 'agents', 'luna')).filter((f) => f.endsWith('.tmp'))).toEqual([]);
   });
 });
 

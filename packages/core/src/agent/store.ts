@@ -10,13 +10,19 @@ import { writeFileAtomic } from './atomic.js';
 export interface AgentConfig {
   name: string;
   voice: string;
+  /** Cómo debe sonar la voz (texto libre, hasta `MAX_VOICE_STYLE_LENGTH` caracteres). Ausente: sin estilo. */
+  voiceStyle?: string;
   personality: string;
   createdAt: string;
   promptsVersion: number;
 }
 
+/** Largo máximo del estilo de voz, en caracteres. */
+export const MAX_VOICE_STYLE_LENGTH = 300;
+
 export interface CreateAgentOptions {
   voice?: string;
+  voiceStyle?: string;
   personality?: string;
   /** Versión de los prompts con que se generaron las caras. Por defecto 1. */
   promptsVersion?: number;
@@ -45,6 +51,13 @@ export class InvalidFaceImageError extends Error {
         'Las caras se guardan siempre como PNG real: convierte la imagen antes de guardarla.',
     );
     this.name = 'InvalidFaceImageError';
+  }
+}
+
+export class InvalidVoiceError extends Error {
+  constructor(detail: string) {
+    super(`Voz inválida: ${detail}.`);
+    this.name = 'InvalidVoiceError';
   }
 }
 
@@ -107,9 +120,11 @@ export function createAgent(
   const ext = photoExtension(photo);
   if (!ext) throw new InvalidPhotoError();
   if (existsSync(join(dir, 'agent.json'))) throw new AgentExistsError(name);
+  const voiceStyle = opts.voiceStyle === undefined ? '' : checkVoiceStyle(opts.voiceStyle);
   const config: AgentConfig = {
     name,
     voice: opts.voice ?? 'Kore',
+    ...(voiceStyle === '' ? {} : { voiceStyle }),
     personality: opts.personality ?? '',
     createdAt: new Date().toISOString(),
     promptsVersion: opts.promptsVersion ?? 1,
@@ -139,7 +154,8 @@ export function loadAgent(root: string, name: string): AgentConfig {
     typeof c.voice !== 'string' ||
     typeof c.personality !== 'string' ||
     typeof c.createdAt !== 'string' ||
-    typeof c.promptsVersion !== 'number'
+    typeof c.promptsVersion !== 'number' ||
+    (c.voiceStyle !== undefined && typeof c.voiceStyle !== 'string')
   ) {
     throw new CorruptAgentError(name, 'faltan campos o tienen un tipo incorrecto');
   }
@@ -147,6 +163,36 @@ export function loadAgent(root: string, name: string): AgentConfig {
     throw new CorruptAgentError(name, `el nombre guardado es "${c.name}"`);
   }
   return c as unknown as AgentConfig;
+}
+
+/** Devuelve el estilo sin espacios en los extremos; lanza si pasa de `MAX_VOICE_STYLE_LENGTH`. */
+function checkVoiceStyle(style: string): string {
+  const trimmed = style.trim();
+  if (trimmed.length > MAX_VOICE_STYLE_LENGTH) {
+    throw new InvalidVoiceError(`el estilo de voz admite hasta ${MAX_VOICE_STYLE_LENGTH} caracteres`);
+  }
+  return trimmed;
+}
+
+/**
+ * Cambia la voz y/o el estilo de voz de un agente reescribiendo `agent.json` de forma atómica.
+ * `voiceStyle: ''` quita el estilo. Lo que no se indica no se toca. No repara un archivo dañado.
+ */
+export function updateAgentVoice(
+  root: string,
+  name: string,
+  changes: { voice?: string; voiceStyle?: string },
+): AgentConfig {
+  const current = loadAgent(root, name);
+  const { voiceStyle: _quitado, ...rest } = current;
+  const voice = changes.voice === undefined ? current.voice : changes.voice.trim();
+  if (voice === '') throw new InvalidVoiceError('el nombre de la voz no puede estar vacío');
+  const style =
+    changes.voiceStyle === undefined ? (current.voiceStyle ?? '') : checkVoiceStyle(changes.voiceStyle);
+  const next: AgentConfig = { ...rest, voice, ...(style === '' ? {} : { voiceStyle: style }) };
+  if (JSON.stringify(next) === JSON.stringify(current)) return current;
+  writeFileAtomic(join(agentDir(root, name), 'agent.json'), `${JSON.stringify(next, null, 2)}\n`);
+  return next;
 }
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
