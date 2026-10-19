@@ -21,6 +21,8 @@ export const FALLBACK_SPEECH_COST_USD = 0.01;
 export interface SpeechInput {
   text: string;
   voice: string;
+  /** Cómo debe sonar la voz (texto libre). Vacío o ausente: Gemini usa su estilo por defecto. */
+  style?: string;
 }
 
 export interface SpeechResult {
@@ -61,10 +63,14 @@ export function createGeminiTtsClient(
   ai: InteractionsApi = new GoogleGenAI({ apiKey: cfg.apiKey }),
 ): TtsClient {
   return {
-    async speak({ text, voice }) {
+    async speak({ text, voice, style }) {
+      const annotations =
+        style !== undefined && style.trim() !== ''
+          ? { annotations: [{ type: 'speech_metadata', style }] }
+          : {};
       const result = (await ai.interactions.create({
         model: cfg.ttsModel,
-        input: [{ type: 'user_input', content: [{ type: 'text', text }] }],
+        input: [{ type: 'user_input', content: [{ type: 'text', text, ...annotations }] }],
         response_format: { type: 'audio', mime_type: 'audio/wav', sample_rate: TTS_SAMPLE_RATE },
         generation_config: { speech_config: [{ voice }] },
       })) as SpeechInteraction;
@@ -119,11 +125,12 @@ export async function synthesizeSpeech(
   client: TtsClient,
   text: string,
   voice: string,
+  style?: string,
 ): Promise<{ wav: Buffer; costUsd: number; costEstimated: boolean }> {
   if (text.trim() === '') {
     throw new Error('No hay texto que sintetizar: el texto está vacío.');
   }
-  const { wav, inputTokens, outputTokens } = await client.speak({ text, voice });
+  const { wav, inputTokens, outputTokens } = await client.speak({ text, voice, ...(style === undefined ? {} : { style }) });
   if (inputTokens === null || outputTokens === null) {
     return { wav, costUsd: estimateSpeechCostUsd(wav, text), costEstimated: true };
   }

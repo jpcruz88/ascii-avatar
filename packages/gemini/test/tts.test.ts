@@ -91,6 +91,48 @@ describe('createGeminiTtsClient', () => {
     expect(out.outputTokens).toBe(25);
   });
 
+  it('con estilo añade la anotación speech_metadata al texto', async () => {
+    const { ai, requests } = apiReturning({ output_audio: { data: wav.toString('base64') } });
+    const style = 'un hombre mexicano de unos sesenta años, voz grave, cálida y pausada';
+
+    await createGeminiTtsClient(cfg, ai).speak({ text: 'Hola', voice: 'Algenib', style });
+
+    expect(requests).toEqual([
+      {
+        model: cfg.ttsModel,
+        input: [
+          {
+            type: 'user_input',
+            content: [
+              { type: 'text', text: 'Hola', annotations: [{ type: 'speech_metadata', style }] },
+            ],
+          },
+        ],
+        response_format: { type: 'audio', mime_type: 'audio/wav', sample_rate: 24000 },
+        generation_config: { speech_config: [{ voice: 'Algenib' }] },
+      },
+    ]);
+  });
+
+  it.each([undefined, '', '   '])('con estilo %j no envía anotaciones', async (style) => {
+    const { ai, requests } = apiReturning({ output_audio: { data: wav.toString('base64') } });
+
+    await createGeminiTtsClient(cfg, ai).speak({
+      text: 'Hola',
+      voice: 'Kore',
+      ...(style === undefined ? {} : { style }),
+    });
+
+    expect(requests).toEqual([
+      {
+        model: cfg.ttsModel,
+        input: [{ type: 'user_input', content: [{ type: 'text', text: 'Hola' }] }],
+        response_format: { type: 'audio', mime_type: 'audio/wav', sample_rate: 24000 },
+        generation_config: { speech_config: [{ voice: 'Kore' }] },
+      },
+    ]);
+  });
+
   it('suma los tokens de pensamiento a la salida', async () => {
     const { ai } = apiReturning({
       output_audio: { data: wav.toString('base64') },
@@ -182,8 +224,8 @@ describe('synthesizeSpeech', () => {
     wav: Buffer;
     inputTokens: number | null;
     outputTokens: number | null;
-  }): { client: TtsClient; calls: Array<{ text: string; voice: string }> } {
-    const calls: Array<{ text: string; voice: string }> = [];
+  }): { client: TtsClient; calls: Array<{ text: string; voice: string; style?: string }> } {
+    const calls: Array<{ text: string; voice: string; style?: string }> = [];
     const client: TtsClient = {
       async speak(input) {
         calls.push(input);
@@ -203,6 +245,18 @@ describe('synthesizeSpeech', () => {
     expect(result.costUsd).toBeCloseTo(0.0051, 6);
     expect(result.costEstimated).toBe(false);
     expect(calls).toEqual([{ text: 'Hola mundo', voice: 'Kore' }]);
+  });
+
+  it('pasa el estilo al cliente solo cuando se indica', async () => {
+    const { client, calls } = clientWith({ wav: silentWav(1), inputTokens: 1, outputTokens: 1 });
+
+    await synthesizeSpeech(client, 'Hola', 'Algenib', 'grave y pausada');
+    await synthesizeSpeech(client, 'Hola', 'Algenib');
+
+    expect(calls).toEqual([
+      { text: 'Hola', voice: 'Algenib', style: 'grave y pausada' },
+      { text: 'Hola', voice: 'Algenib' },
+    ]);
   });
 
   it('estima el costo por la duración del WAV cuando faltan los tokens', async () => {
