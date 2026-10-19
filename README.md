@@ -15,7 +15,7 @@ Una cara hecha de caracteres de terminal para tu agente de IA. Subes una foto un
   +-------------------------------------+------------------------+
         tu trabajo, como siempre              el panel del avatar
 
-  pie del panel:  ana · voz: on · gasto hoy: $0.012
+  pie del panel:  ana · voz: on · gasto hoy: $0.22 MXN
 ```
 
 (Es solo una ilustración. La cara real sale de tu foto y se dibuja en blanco y negro, como un grabado: tinta oscura sobre papel claro.)
@@ -98,14 +98,14 @@ avatar create ana --foto ~/Fotos/ana.jpg
 El nombre del agente va de 1 a 32 caracteres entre `a-z`, `0-9` y guion. Si omites `--foto`, el comando te la pide (acepta PNG, JPG o WebP de hasta 10 MB, con cada lado entre 256 y 8000 px; sirve arrastrar el archivo a la terminal). El flujo es:
 
 1. **Llave de Gemini.** Si no hay una guardada ni definida en `GEMINI_API_KEY`, te la pide sin mostrarla al escribir y la guarda en `~/.ascii-avatar/secrets.json` con permisos 0600 (la carpeta queda en 0700). La llave nunca se guarda dentro de la carpeta del agente ni en el repositorio.
-2. **Estimado y confirmación.** Antes de gastar nada muestra el costo estimado de las caras que faltan (unos $0.055 USD por cara, incluida la foto de entrada, y alrededor de $0.44 USD para las ocho), el tope y lo que ya se gastó en ese agente. Solo continúa si respondes `s`, `si` o `sí`.
-3. **Vista previa barata.** Genera primero una sola cara, `mouth_open`, y la dibuja en la terminal. Si no se parece a ti o la definición no te convence, responde que no: solo gastaste una imagen (unos $0.055 USD). El agente ya quedó creado con esa foto y no se puede cambiar: para reintentar con otra foto, usa un nombre nuevo (`avatar create ana2 --foto otra.jpg`) o borra la carpeta `~/.ascii-avatar/agents/<nombre>` y empieza de cero. Si corres `avatar create` con el mismo nombre y una foto distinta, el comando se detiene sin preguntar ni gastar y te indica la carpeta.
+2. **Estimado y confirmación.** Antes de gastar nada muestra el costo estimado de las caras que faltan (unos $1.01 MXN por cara, incluida la foto de entrada, y alrededor de $8 MXN para las ocho), el tope y lo que ya se gastó en ese agente, todo en pesos mexicanos (por ejemplo, `Estimado: $8.10 MXN (tope $29.44 MXN)`). Solo continúa si respondes `s`, `si` o `sí`.
+3. **Vista previa barata.** Genera primero una sola cara, `mouth_open`, y la dibuja en la terminal. Si no se parece a ti o la definición no te convence, responde que no: solo gastaste una imagen (unos $1.01 MXN). El agente ya quedó creado con esa foto y no se puede cambiar: para reintentar con otra foto, usa un nombre nuevo (`avatar create ana2 --foto otra.jpg`) o borra la carpeta `~/.ascii-avatar/agents/<nombre>` y empieza de cero. Si corres `avatar create` con el mismo nombre y una foto distinta, el comando se detiene sin preguntar ni gastar y te indica la carpeta.
 4. **El resto.** Si apruebas, genera las otras siete caras. Cada una se guarda en disco y se registra su costo apenas termina.
-5. **Tope.** Si el gasto de creación de ese agente llegara a $1.60 USD, se detiene y avisa. Lo ya generado queda guardado.
+5. **Tope.** Si el gasto de creación de ese agente llegara a $29.44 MXN, se detiene y avisa. Lo ya generado queda guardado.
 
 Si algo se interrumpe (falla la red, cerraste la terminal), basta con volver a correr el mismo comando (con la misma foto o sin `--foto`): reutiliza la foto guardada y solo genera las caras que faltan. Nunca se vuelve a pagar por una cara ya hecha.
 
-El tope sí es definitivo: el gasto de creación se acumula por agente, así que si ya llegaste a $1.60 USD, volver a correr `avatar create` te pide confirmar y se detiene en la primera cara por el mismo tope. Las caras que falten las aportas tú con `avatar create <nombre> --caras <carpeta>` (ver [paquete de caras manual](#aportar-un-paquete-de-caras-manual)); ese comando no usa Gemini, así que el tope no le afecta.
+El tope sí es definitivo: el gasto de creación se acumula por agente, así que si ya llegaste a $29.44 MXN, volver a correr `avatar create` te pide confirmar y se detiene en la primera cara por el mismo tope. Las caras que falten las aportas tú con `avatar create <nombre> --caras <carpeta>` (ver [paquete de caras manual](#aportar-un-paquete-de-caras-manual)); ese comando no usa Gemini, así que el tope no le afecta.
 
 Al terminar, si no tenías ningún agente activo, el nuevo queda como agente activo en `~/.ascii-avatar/config.json`.
 
@@ -237,18 +237,20 @@ Las tarifas son las de la documentación oficial de Gemini verificadas el 18 de 
 
 | Concepto | Cifra |
 | --- | --- |
-| Modelo de imágenes | `gemini-nano-banana-2.1`, unos $0.055 USD por cara, incluida la foto de entrada (estimado, calibrado con una corrida real: 8 caras costaron $0.42) |
-| Un agente completo (8 imágenes) | alrededor de $0.42 a $0.45 USD |
-| Meta normal de creación | menos de $0.60 USD por agente |
-| Tope duro de creación | $1.60 USD por agente (unos 29 MXN) |
-| Voz | unos $0.03 USD por minuto (tarifa conservadora: el registro sobrestima un poco) |
-| Límite diario de voz | $0.30 USD (unos 10 minutos de voz), configurable |
+| Modelo de imágenes | `gemini-nano-banana-2.1`, unos $1.01 MXN por cara, incluida la foto de entrada (estimado, calibrado con una corrida real: 8 caras costaron unos $7.73 MXN) |
+| Un agente completo (8 imágenes) | alrededor de $8 MXN (entre $7.73 y $8.28 MXN) |
+| Meta normal de creación | menos de $11 MXN por agente |
+| Tope duro de creación | unos $29 MXN por agente |
+| Voz | unos $0.55 MXN por minuto (tarifa conservadora: el registro sobrestima un poco) |
+| Límite diario de voz | unos $5.50 MXN (unos 10 minutos de voz), configurable |
+
+Todas las cifras están en pesos mexicanos al tipo de cambio por defecto de 18.4 pesos por dólar (`mxnPorUsd`, ver más abajo). **Internamente los montos se registran en dólares (USD)**, porque Gemini cobra en dólares: el registro `ledger.jsonl`, las tarifas de `pricing.ts` y los topes siguen en USD, y los pesos son solo la forma de mostrarlos. Por eso, si cambia el tipo de cambio, cambian las cifras que lees pero no lo que Google te cobra.
 
 Cómo se aplican:
 
-- **Creación.** Se muestra el estimado y se pide confirmación antes de gastar. Antes de cada imagen se comprueba que el gasto acumulado de ese agente más el de la imagen no pase de $1.60 USD; si pasara, se detiene. Cada imagen se registra en `~/.ascii-avatar/ledger.jsonl` en cuanto se cobra. Los costos se calculan con los tokens que reporta la API; si no los reporta, se marcan como "(estimado)".
-- **Voz.** Cada síntesis se registra en el mismo archivo. Al llegar al límite diario, el avatar deja de hablar por el resto del día (sigue gesticulando) y muestra "Límite diario de voz alcanzado". El día cuenta en hora local.
-- **Contador "gasto hoy".** El pie del panel muestra siempre lo gastado hoy en voz, en dólares con tres decimales.
+- **Creación.** Se muestra el estimado y se pide confirmación antes de gastar. Antes de cada imagen se comprueba que el gasto acumulado de ese agente más el de la imagen no pase del tope ($29.44 MXN); si pasara, se detiene. Cada imagen se registra en `~/.ascii-avatar/ledger.jsonl` en cuanto se cobra. Los costos se calculan con los tokens que reporta la API; si no los reporta, se marcan como "(estimado)".
+- **Voz.** Cada síntesis se registra en el mismo archivo. Al llegar al límite diario, el avatar deja de hablar por el resto del día (sigue gesticulando) y muestra "Límite diario de voz alcanzado" junto con el límite en pesos. El día cuenta en hora local.
+- **Contador "gasto hoy".** El pie del panel muestra siempre lo gastado hoy en voz, en pesos con dos decimales (por ejemplo, `gasto hoy: $0.22 MXN`; desde 100 pesos sin decimales).
 - **Cambiar el límite diario.** Cierra el panel (`q`), edita `~/.ascii-avatar/config.json` y vuelve a abrir el panel. El panel lee el archivo una sola vez al arrancar, así que un cambio hecho con el panel abierto no se aplica hasta que lo reabras (al pulsar `v` solo se actualiza la voz y se conserva el resto de lo que haya en el archivo):
 
 ```json
@@ -256,12 +258,19 @@ Cómo se aplican:
   "activeAgent": "ana",
   "voice": false,
   "dailyLimitUsd": 0.5,
+  "mxnPorUsd": 18.4,
+  "limiteDiarioMxn": 10,
   "mode": "grabado",
   "cols": 70
 }
 ```
 
-`dailyLimitUsd` es un número en dólares (0 desactiva la voz de hecho). `mode` y `cols` son los valores por defecto del panel; las opciones de `avatar panel` los sobrescriben. Lo mismo vale para los tres: `dailyLimitUsd`, `mode` y `cols` se editan con el panel cerrado y se aplican al reabrirlo. Un archivo ausente o con valores inválidos vuelve a los valores por defecto.
+- `limiteDiarioMxn` es el límite diario de voz en pesos mexicanos (0 desactiva la voz de hecho). Es opcional: si está presente y es válido (número finito, no negativo), manda sobre `dailyLimitUsd`; se convierte a dólares con `mxnPorUsd` para compararlo con el registro de gasto.
+- `dailyLimitUsd` es el límite diario en dólares. Se conserva por compatibilidad y solo se usa si no hay un `limiteDiarioMxn` válido (por defecto 0.30, unos $5.52 MXN; 0 desactiva la voz de hecho).
+- `mxnPorUsd` es el tipo de cambio con el que se muestran los pesos: cuántos pesos vale un dólar (por defecto 18.4). Debe ser un número finito mayor que 0; si no, se usa el valor por defecto. Solo cambia lo que ves, no lo que se registra ni lo que cobra Gemini.
+- `mode` y `cols` son los valores por defecto del panel; las opciones de `avatar panel` los sobrescriben.
+
+Todos se editan con el panel cerrado y se aplican al reabrirlo. Un archivo ausente o con valores inválidos vuelve a los valores por defecto.
 
 Los precios de un servicio externo cambian. Si ves que el gasto real se desvía de estas cifras, revisa `ledger.jsonl` y el panel de uso de tu cuenta de Google AI Studio.
 
@@ -400,7 +409,7 @@ Los ids de modelo se pueden cambiar sin tocar el código por si Google retira o 
 
 **"Voz bloqueada: no se pudo registrar el gasto".** El panel no pudo escribir en `~/.ascii-avatar/ledger.jsonl` (permisos, disco lleno). Sin ese registro no se puede hacer cumplir el límite, así que la voz se bloquea hasta que reinicies el panel. Arregla el permiso o el espacio y vuelve a abrirlo.
 
-**"Límite diario de voz alcanzado".** Ya se gastó el límite de hoy. Cierra el panel, sube `dailyLimitUsd` en `config.json` y ábrelo de nuevo (el panel solo lee ese valor al arrancar), o espera al día siguiente. Mientras tanto el avatar sigue gesticulando.
+**"Límite diario de voz alcanzado".** Ya se gastó el límite de hoy (el aviso muestra el límite en pesos). Cierra el panel, sube `limiteDiarioMxn` (o `dailyLimitUsd`) en `config.json` y ábrelo de nuevo (el panel solo lee ese valor al arrancar), o espera al día siguiente. Mientras tanto el avatar sigue gesticulando.
 
 **"Gemini rechazó el texto; sin voz esta vez".** El filtro de Gemini no aceptó ese resumen. Pasa de vez en cuando; la siguiente respuesta funciona normal.
 
