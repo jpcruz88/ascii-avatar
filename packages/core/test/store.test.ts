@@ -88,6 +88,23 @@ describe('createAgent / loadAgent', () => {
     expect(b.promptsVersion).toBe(3);
   });
 
+  it('guarda el estilo de creación si se indica; sin indicarlo no escribe el campo', async () => {
+    const photo = await png4x4(10);
+    const g = createAgent(root, 'g', photo, { style: 'grabado' });
+    expect(g.style).toBe('grabado');
+    expect(loadAgent(root, 'g').style).toBe('grabado');
+    expect(createAgent(root, 'f', photo, { style: 'foto' }).style).toBe('foto');
+    const legacy = createAgent(root, 'l', photo);
+    expect('style' in legacy).toBe(false);
+    expect(loadAgent(root, 'l').style).toBeUndefined();
+  });
+
+  it('updateAgentVoice conserva el estilo de creación', async () => {
+    createAgent(root, 'g', await png4x4(10), { style: 'grabado' });
+    expect(updateAgentVoice(root, 'g', { voice: 'Puck' }).style).toBe('grabado');
+    expect(loadAgent(root, 'g').style).toBe('grabado');
+  });
+
   it('deduce la extensión de los bytes mágicos', () => {
     const jpg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0]);
     const webp = Buffer.concat([
@@ -298,6 +315,8 @@ describe('loadAgent con agent.json dañado', () => {
     ['name distinto de la carpeta', { ...good, name: 'otro' }],
     ['voiceStyle numérico', { ...good, voiceStyle: 3 }],
     ['voiceStyle null', { ...good, voiceStyle: null }],
+    ['style desconocido', { ...good, style: 'acuarela' }],
+    ['style numérico', { ...good, style: 1 }],
   ])('forma incorrecta (%s) lanza CorruptAgentError', (_t, value) => {
     writeRaw('luna', JSON.stringify(value));
     expect(() => loadAgent(root, 'luna')).toThrow(CorruptAgentError);

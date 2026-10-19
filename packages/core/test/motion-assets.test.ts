@@ -18,6 +18,7 @@ import {
   poseFrameId,
   saveClips,
   saveFace,
+  savePose,
   savePoses,
   type FaceId,
 } from '../src/index.js';
@@ -93,6 +94,29 @@ describe('savePoses y listPoses', () => {
       InvalidFaceImageError,
     );
     expect(() => savePoses(root, 'luna', { saludo: Buffer.alloc(0) } as never)).toThrow(/desconocida/i);
+    expect(listPoses(root, 'luna')).toEqual(['nod_up']);
+  });
+
+  it('savePose agrega o reemplaza una sola pose y conserva las demás, sin temporales', async () => {
+    await agentWithFaces();
+    const one = await solid(1);
+    const two = await solid(2);
+    savePose(root, 'luna', 'look_right', one);
+    savePose(root, 'luna', 'tilt_left', two);
+    expect(listPoses(root, 'luna')).toEqual(['tilt_left', 'look_right']);
+    expect(readFileSync(join(dir(), 'poses', 'look_right.png')).equals(one)).toBe(true);
+    savePose(root, 'luna', 'look_right', two);
+    expect(readFileSync(join(dir(), 'poses', 'look_right.png')).equals(two)).toBe(true);
+    expect(listPoses(root, 'luna')).toEqual(['tilt_left', 'look_right']);
+    expect(readdirSync(dir()).filter((f) => f.includes('.tmp') || f.includes('.old'))).toEqual([]);
+  });
+
+  it('savePose con un PNG falso o un id desconocido no escribe nada', async () => {
+    await agentWithFaces();
+    savePose(root, 'luna', 'nod_up', await solid(3));
+    expect(() => savePose(root, 'luna', 'nod_down', Buffer.from('hola'))).toThrow(InvalidFaceImageError);
+    const ok = await solid(1);
+    expect(() => savePose(root, 'luna', 'saludo' as never, ok)).toThrow(/desconocida/i);
     expect(listPoses(root, 'luna')).toEqual(['nod_up']);
   });
 

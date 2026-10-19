@@ -35,11 +35,13 @@ export {
   missingFaces,
   saveClips,
   saveFace,
+  savePose,
   savePoses,
   updateAgentVoice,
   validateAgentName,
 } from './agent/store.js';
-export type { AgentConfig, Atlas, CreateAgentOptions } from './agent/store.js';
+export { AGENT_STYLES } from './agent/store.js';
+export type { AgentConfig, AgentStyle, Atlas, CreateAgentOptions } from './agent/store.js';
 export { loadApiKey, saveApiKey } from './agent/secrets.js';
 export {
   BudgetExceededError,

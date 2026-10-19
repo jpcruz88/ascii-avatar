@@ -36,7 +36,16 @@ export interface AgentConfig {
   personality: string;
   createdAt: string;
   promptsVersion: number;
+  /**
+   * Estilo con que `avatar create` generó las imágenes. Ausente en agentes viejos o importados: el
+   * CLI los trata como `foto`, para no mezclar un grabado con caras realistas al reanudar.
+   */
+  style?: AgentStyle;
 }
+
+/** Estilos de creación con Gemini: grabado en blanco y negro o foto realista. */
+export const AGENT_STYLES = ['grabado', 'foto'] as const;
+export type AgentStyle = (typeof AGENT_STYLES)[number];
 
 /** Largo máximo del estilo de voz, en caracteres. */
 export const MAX_VOICE_STYLE_LENGTH = 300;
@@ -47,6 +56,8 @@ export interface CreateAgentOptions {
   personality?: string;
   /** Versión de los prompts con que se generaron las caras. Por defecto 1. */
   promptsVersion?: number;
+  /** Estilo de creación; sin indicarlo, `agent.json` no lleva el campo. */
+  style?: AgentStyle;
 }
 
 export class InvalidAgentNameError extends Error {
@@ -149,6 +160,7 @@ export function createAgent(
     personality: opts.personality ?? '',
     createdAt: new Date().toISOString(),
     promptsVersion: opts.promptsVersion ?? 1,
+    ...(opts.style === undefined ? {} : { style: opts.style }),
   };
   mkdirSync(join(dir, 'faces'), { recursive: true });
   // agent.json va al final: su existencia indica que el agente quedó completo.
@@ -176,7 +188,8 @@ export function loadAgent(root: string, name: string): AgentConfig {
     typeof c.personality !== 'string' ||
     typeof c.createdAt !== 'string' ||
     typeof c.promptsVersion !== 'number' ||
-    (c.voiceStyle !== undefined && typeof c.voiceStyle !== 'string')
+    (c.voiceStyle !== undefined && typeof c.voiceStyle !== 'string') ||
+    (c.style !== undefined && !(AGENT_STYLES as readonly unknown[]).includes(c.style))
   ) {
     throw new CorruptAgentError(name, 'faltan campos o tienen un tipo incorrecto');
   }
@@ -267,6 +280,20 @@ export function savePoses(root: string, name: string, poses: Partial<Record<Pose
     files.set(`${id}.png`, png);
   }
   replaceDir(dir, POSES_DIR, files);
+}
+
+/**
+ * Agrega o reemplaza una sola pose y conserva las demás. Usa el mismo reemplazo casi atómico que
+ * `savePoses` (el juego entero se reescribe), así que un corte nunca deja una pose a medias.
+ */
+export function savePose(root: string, name: string, id: PoseId, png: Buffer): void {
+  const dir = agentDir(root, name);
+  if (!(POSE_IDS as readonly string[]).includes(id)) throw new Error(`Pose desconocida: ${JSON.stringify(id)}.`);
+  if (!isPng(png)) throw new InvalidFaceImageError(`pose ${id}`);
+  const poses: Partial<Record<PoseId, Buffer>> = {};
+  for (const other of posesIn(dir)) poses[other] = readFileSync(join(dir, POSES_DIR, `${other}.png`));
+  poses[id] = png;
+  savePoses(root, name, poses);
 }
 
 /**
