@@ -1,0 +1,23 @@
+{
+  "name": "@ascii-avatar/web",
+  "version": "0.1.0",
+  "description": "Elemento <ascii-avatar> para usar un avatar exportado en cualquier página web.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/ascii-avatar.js",
+  "exports": {
+    ".": "./dist/ascii-avatar.js"
+  },
+  "files": [
+    "dist/ascii-avatar.js"
+  ],
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@ascii-avatar/core": "*"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

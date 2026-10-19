@@ -13,10 +13,13 @@
   ],
   "scripts": {
     "test": "vitest run",
-    "build": "tsc -b"
+    "build": "tsc -b && npm run build --workspace @ascii-avatar/web",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/node": "^26.6.5",
+    "happy-dom": "^21.0.3",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
