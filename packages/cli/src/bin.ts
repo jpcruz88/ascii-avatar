@@ -23,6 +23,9 @@ Uso:
   avatar voz <nombre> [--voz <Nombre>] [--estilo "<texto>"]
                                            Muestra o cambia la voz y el estilo de voz de un agente
                                            (--estilo "" quita el estilo; reinicia el panel para aplicarlo)
+  avatar movimientos <nombre> [--liveportrait <carpeta>] [--clips nod,think,...]
+                                           Genera los clips de movimiento de cabeza en tu equipo con
+                                           LivePortrait (gratis; se instala aparte, ver el README)
   avatar install-hook [--uninstall] [--settings <ruta>]
                                            Conecta (o desconecta) el avatar con Claude Code
   avatar help                              Muestra esta ayuda
@@ -231,6 +234,25 @@ async function installHookCmd(args: ParsedArgs): Promise<number> {
   }
 }
 
+/** `avatar movimientos <nombre>`: clips de cabeza con LivePortrait, en local y gratis. */
+async function movimientos(args: ParsedArgs, root: string): Promise<number> {
+  const [name] = args.positionals;
+  if (name === undefined) return fail('Uso: avatar movimientos <nombre> [--liveportrait <carpeta>] [--clips nod,think,...]');
+  const { liveportrait, clips } = args.flags;
+  if (liveportrait === true || clips === true) return fail('Faltan valores en las opciones.');
+  try {
+    const { runMovimientosCli } = await import('./commands/movimientos.js');
+    return await runMovimientosCli({
+      root,
+      name,
+      ...(liveportrait === undefined ? {} : { liveportrait }),
+      ...(clips === undefined ? {} : { clips }),
+    });
+  } catch (error) {
+    return fail(error instanceof Error ? (error.message.split('\n')[0] ?? 'Error.') : 'Error.');
+  }
+}
+
 async function main(argv: string[]): Promise<number> {
   const root = defaultRoot();
   let args: ParsedArgs;
@@ -241,7 +263,7 @@ async function main(argv: string[]): Promise<number> {
   }
   if (args.cmd !== undefined) {
     const unknown = unknownFlags(args.cmd, args.flags);
-    if (unknown.length > 0 && ['create', 'panel', 'voice', 'voz', 'install-hook', 'help'].includes(args.cmd)) {
+    if (unknown.length > 0 && ['create', 'panel', 'voice', 'voz', 'install-hook', 'movimientos', 'help'].includes(args.cmd)) {
       return fail(`Opción desconocida: ${unknown.map((f) => `--${f}`).join(', ')}\n\n${HELP}`);
     }
   }
@@ -268,6 +290,8 @@ async function main(argv: string[]): Promise<number> {
       return voz(args, root);
     case 'install-hook':
       return installHookCmd(args);
+    case 'movimientos':
+      return movimientos(args, root);
     default:
       return fail(`Comando desconocido: ${args.cmd}\n\n${HELP}`);
   }

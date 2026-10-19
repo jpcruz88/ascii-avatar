@@ -14,6 +14,8 @@ export interface CliConfig {
   limiteDiarioMxn?: number;
   mode: AsciiMode;
   cols: number;
+  /** Carpeta de la instalación local de LivePortrait (`avatar movimientos`). Opcional. */
+  liveportraitDir?: string;
 }
 
 /** Valores por defecto. El modo `grabado` (blanco y negro, tinta sobre papel) es el aspecto por defecto. */
@@ -67,6 +69,7 @@ export function loadConfig(root: string): CliConfig {
       typeof c.cols === 'number' && Number.isInteger(c.cols) && c.cols >= 20 && c.cols <= 500
         ? c.cols
         : d.cols,
+    ...(typeof c.liveportraitDir === 'string' && c.liveportraitDir !== '' ? { liveportraitDir: c.liveportraitDir } : {}),
   };
 }
 

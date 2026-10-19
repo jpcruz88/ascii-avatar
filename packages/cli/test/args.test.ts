@@ -106,3 +106,19 @@ describe('--modo', () => {
     expect(isModo(undefined)).toBe(false);
   });
 });
+
+describe('avatar movimientos', () => {
+  it('--liveportrait y --clips llevan valor', () => {
+    expect(parseArgs(['movimientos', 'ana', '--liveportrait', '/lp', '--clips', 'nod,think'])).toEqual({
+      cmd: 'movimientos',
+      positionals: ['ana'],
+      flags: { liveportrait: '/lp', clips: 'nod,think' },
+    });
+    expect(() => parseArgs(['movimientos', 'ana', '--liveportrait'])).toThrow(/--liveportrait/);
+  });
+
+  it('solo acepta --liveportrait y --clips', () => {
+    expect(unknownFlags('movimientos', { liveportrait: '/lp', clips: 'nod' })).toEqual([]);
+    expect(unknownFlags('movimientos', { foto: 'x', clips: 'nod' })).toEqual(['foto']);
+  });
+});

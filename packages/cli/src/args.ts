@@ -12,7 +12,7 @@ export function isModo(value: unknown): value is (typeof MODOS)[number] {
 }
 
 /** Banderas que llevan un valor; las demás son interruptores. */
-export const VALUE_FLAGS: ReadonlySet<string> = new Set(['foto', 'caras', 'poses', 'clips', 'agente', 'cols', 'modo', 'settings', 'voz', 'estilo']);
+export const VALUE_FLAGS: ReadonlySet<string> = new Set(['foto', 'caras', 'poses', 'clips', 'agente', 'cols', 'modo', 'settings', 'voz', 'estilo', 'liveportrait']);
 
 /** Separa `argv` (sin `node` ni el script) en comando, posicionales y banderas. Lanza si falta un valor. */
 export function parseArgs(argv: readonly string[], valueFlags: ReadonlySet<string> = VALUE_FLAGS): ParsedArgs {
@@ -52,6 +52,7 @@ const ALLOWED_FLAGS: Readonly<Record<string, readonly string[]>> = {
   voice: [],
   voz: ['voz', 'estilo'],
   'install-hook': ['uninstall', 'settings'],
+  movimientos: ['liveportrait', 'clips'],
   help: [],
 };
 

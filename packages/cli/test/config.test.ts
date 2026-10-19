@@ -151,3 +151,16 @@ describe('config: límite diario en pesos (limiteDiarioMxn)', () => {
     expect(effectiveDailyLimitUsd(loadConfig(root))).toBe(0.9);
   });
 });
+
+describe('config: carpeta de LivePortrait (liveportraitDir)', () => {
+  const write = (c: unknown): void => writeFileSync(configPath(root), JSON.stringify(c));
+
+  it('conserva una ruta y descarta la vacía o de otro tipo', () => {
+    write({ liveportraitDir: '/opt/lp' });
+    expect(loadConfig(root).liveportraitDir).toBe('/opt/lp');
+    for (const bad of ['', 3, null, true]) {
+      write({ liveportraitDir: bad });
+      expect(loadConfig(root)).not.toHaveProperty('liveportraitDir');
+    }
+  });
+});
