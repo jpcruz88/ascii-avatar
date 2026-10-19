@@ -210,3 +210,37 @@ describe('parseWav', () => {
     }
   });
 });
+
+describe('parseWav sin Buffer de Node (navegador)', () => {
+  const pcm = sine(480, 12000);
+  const wav = makeWav({ pcm });
+  const expected = parseWav(wav);
+
+  it('acepta un Uint8Array y da lo mismo que con un Buffer', () => {
+    const bytes = new Uint8Array(wav.length);
+    bytes.set(wav);
+    expect(Object.getPrototypeOf(bytes)).toBe(Uint8Array.prototype);
+    const got = parseWav(bytes);
+    expect(got.sampleRate).toBe(expected.sampleRate);
+    expect(Array.from(got.samples)).toEqual(Array.from(expected.samples));
+  });
+
+  it('acepta un ArrayBuffer', () => {
+    const copy = new ArrayBuffer(wav.length);
+    new Uint8Array(copy).set(wav);
+    const got = parseWav(copy);
+    expect(got.sampleRate).toBe(24000);
+    expect(Array.from(got.samples)).toEqual(Array.from(expected.samples));
+  });
+
+  it('respeta el desplazamiento de una vista dentro de un búfer más grande', () => {
+    const big = new Uint8Array(wav.length + 7);
+    big.set(wav, 3);
+    const got = parseWav(big.subarray(3, 3 + wav.length));
+    expect(Array.from(got.samples)).toEqual(Array.from(expected.samples));
+  });
+
+  it('un Uint8Array que no es WAV lanza InvalidWavError', () => {
+    expect(() => parseWav(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]))).toThrow(InvalidWavError);
+  });
+});
